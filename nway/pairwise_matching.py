@@ -213,7 +213,12 @@ class ComputePairWiseMatch(object):
         matching_pairs['weight_matrix'] = weight_matrix
         matching_pairs['moving'] = para_matching['filename_intensity_moving']
         matching_pairs['fixed'] = para_matching['filename_intensity_fixed']
-        matching_pairs['transform'] = tform.tolist()
+        
+        # if affine only, output full 3x3
+        if tform.shape == (2, 3):
+            tform = np.vstack((tform, [0, 0, 1]))
+
+        matching_pairs['transform'] = np.round(tform, 6).tolist()
 
         return matching_pairs
 
