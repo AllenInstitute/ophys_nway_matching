@@ -412,6 +412,13 @@ class NwayMatching(object):
 
             matchingdata["cell_rois"][labelstr] = thisrgn
 
+        matchingdata["transforms"] = []
+        for k in self.matching_res_dict:
+            matchingdata["transforms"].append({
+                "moving": k['moving'],
+                "fixed": k['fixed'],
+                "transform": k['transform']})
+
         with open(output_json, 'w') as myfile:
             json.dump(matchingdata, myfile, sort_keys=True, indent=4)
 
