@@ -25,9 +25,6 @@ import nway.region_properties as rp
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
-def sum_me(a, b):
-    return a + b
-
 
 class CellMatchingParameters(ArgSchema):
     ''' Class that uses argschema to take care of input arguments '''
@@ -643,14 +640,14 @@ class NwayMatching(ArgSchemaParser):
         self.match_nway(self.args)
         logger.info("Nway matching is done!")
     
-        #self.write_matching_table()
-        #logger.info("Matching table is written!")
+        self.write_matching_table()
+        logger.info("Matching table is written!")
     
-        #self.write_output_json(self.args['output_json'])
-        #logger.info("Output json is generated!")
+        self.write_output_json(self.args['output_json'])
+        logger.info("Output json is generated!")
     
-        #self.write_output_images()
-        #logger.info("Matching images are written!")
+        self.write_output_images()
+        logger.info("Matching images are written!")
 
 
 if __name__ == "__main__":

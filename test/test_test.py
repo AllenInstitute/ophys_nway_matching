@@ -1,8 +1,9 @@
 import pytest
-from nway.nway_matching_main import sum_me, NwayMatching
+from nway.nway_matching_main import NwayMatching
 import os
 from jinja2 import Template
 import json
+import numpy as np
 
 TEST_FILE_DIR = os.path.join(
         os.path.dirname(os.path.abspath(__file__)),
@@ -26,11 +27,7 @@ def input_file(tmpdir):
     yield input_json
 
 
-def test_first_test():
-    assert sum_me(2, 2) == 4
-
-
-def test_temp(input_file):
+def test_against_old_results(input_file):
     assert os.path.isfile(input_file)
     with open(input_file, 'r') as f:
         j = json.load(f)
@@ -45,3 +42,19 @@ def test_temp(input_file):
     args['output_json'] = os.path.join(os.path.dirname(input_file), 'output.json')
     n = NwayMatching(input_data=args, args=[])
     n.run()
+
+    # compare old output json and new one
+    thistest = os.path.join(TEST_FILE_DIR, 'test0')
+    old_output_json = os.path.join(thistest, 'output.json')
+    new_output_json = os.path.join(
+            os.path.dirname(input_file), 'output.json')
+
+    with open(old_output_json, 'r') as f:
+        j1 = json.load(f)
+    with open(new_output_json, 'r') as f:
+        j2 = json.load(f)
+    k1 = j1['cell_rois'].keys()
+    k2 = j2['cell_rois'].keys()
+    assert set(k1) == set(k2)
+    for k in k1:
+        assert np.all(j1['cell_rois'][k] == j2['cell_rois'][k])
