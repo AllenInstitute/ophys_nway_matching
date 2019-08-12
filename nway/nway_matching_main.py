@@ -14,6 +14,7 @@ import logging
 import json
 import numpy as np
 import SimpleITK as sitk
+import os
 
 from argschema import ArgSchemaParser, ArgSchema
 from argschema.fields import Boolean, Int, Str, Float
@@ -67,24 +68,15 @@ def parse_command_line():
     return mod.args
 
 
-class NwayMatching(object):
+class NwayMatching(ArgSchemaParser):
+    default_schema = CellMatchingParameters
+
     ''' Class for matching cells across arbitrary number of ophys sessions.
 
         Necessary files are obtained by parsing input json. Final Nway matching
         result is obtained by combining pairwise matching.
     '''
 
-    def __init__(self):
-
-        self.dir_output = ""
-        self.filename_intensity = []
-        self.filename_segmask = []
-        self.filename_exp_prefix = []
-        self.expnum = 0
-        self.matching_res_dict = []
-        self.dict_label_to_roiid = []
-        self.mask_cellnum = []
-        self.matching_table_nway = []
 
     def parse_jsons_with_reference_keyword(self, input_json):
         ''' Parse input json file to genearte the necessary input files
@@ -176,10 +168,9 @@ class NwayMatching(object):
         '''
 
         data = json.loads(open(input_json).read())
-        filename_segmask = \
-            self.dir_output + \
-            filename_exp_prefix_fixed + \
-            '_maxInt_masks_relabel.tif'
+        filename_segmask = os.path.join(
+                self.dir_output,
+                filename_exp_prefix_fixed + '_maxInt_masks_relabel.tif')
         expnum = len(data['experiment_containers']['ophys_experiments'])
 
         for i in range(expnum):
@@ -461,7 +452,7 @@ class NwayMatching(object):
         ''' Write the final matching table that include all the cells in N sessions.
             Each row is one matching. It has N+1 entries. -1 means no match.
             The last entry is the unified label of the cells.'''
-        filename_matching_table = self.dir_output + 'matching_result.txt'
+        filename_matching_table = os.path.join(self.dir_output, 'matching_result.txt')
         np.savetxt(
                 filename_matching_table,
                 self.matching_table_nway,
@@ -514,14 +505,12 @@ class NwayMatching(object):
         ''' Write matching images. Matched cells are given the same label.'''
 
         for k in range(self.expnum):
-            outimgfilename = \
-                self.dir_output + \
-                self.filename_exp_prefix[k] + \
-                '_matching.tif'
-            filename_segmask_relabel = \
-                self.dir_output + \
-                self.filename_exp_prefix[k] + \
-                '_maxInt_masks_relabel.tif'
+            outimgfilename = os.path.join(
+                self.dir_output,
+                self.filename_exp_prefix[k] + '_matching.tif')
+            filename_segmask_relabel = os.path.join(
+                self.dir_output,
+                self.filename_exp_prefix[k] + '_maxInt_masks_relabel.tif')
             segmask_3d, col_segmask, row_segmask, dep_segmask = \
                 pm.read_tiff_3d(filename_segmask_relabel)
 
@@ -581,6 +570,7 @@ class NwayMatching(object):
                     self.filename_intensity[j][ind:ind + 26]
 
                 matching_pair = matching.match_pairs(para, para_matching)
+                print(matching_pair)
 
                 self.matching_res_dict.append(matching_pair)
 
@@ -602,6 +592,8 @@ class NwayMatching(object):
 
         logger.info('Removing redunant inforamtion '
                     'from Nway matching table...')
+
+        print(matching_table_nway_tmp)
         matching_table_nway_tmp = self.remove_nway_table_redundancy(
                 matching_table_nway_tmp)
         logger.info('Pass.')
@@ -619,36 +611,48 @@ class NwayMatching(object):
         return
 
 
-def main():
-    ''' Main function of nway cell matching across multiple ophys sessions.
+    def run(self):
+        ''' Main function of nway cell matching across multiple ophys sessions.
+    
+            The method takes three step:
+            1) Image registration;
+            2) Pairwise matching;
+            3) Combining pairwise matching to generate Nway result.
+        '''
+    
+        #para = parse_command_line()
+    
+        #trial = NwayMatching()
+    
+        # call parse_jsons_with_reference_keyword() for old json format
+        #trial.parse_jsons(para['input_json'])
+        #logger.info('Parsing input json is done!')
 
-        The method takes three step:
-        1) Image registration;
-        2) Pairwise matching;
-        3) Combining pairwise matching to generate Nway result.
-    '''
+        self.dir_output = ""
+        self.filename_intensity = []
+        self.filename_segmask = []
+        self.filename_exp_prefix = []
+        self.expnum = 0
+        self.matching_res_dict = []
+        self.dict_label_to_roiid = []
+        self.mask_cellnum = []
+        self.matching_table_nway = []
 
-    para = parse_command_line()
+        self.parse_jsons(self.args['input_json'])
 
-    trial = NwayMatching()
-
-    # call parse_jsons_with_reference_keyword() for old json format
-    trial.parse_jsons(para['input_json'])
-    logger.info('Parsing input json is done!')
-
-    trial.match_nway(para)
-    logger.info("Nway matching is done!")
-
-    trial.write_matching_table()
-    logger.info("Matching table is written!")
-
-    trial.write_output_json(para['output_json'])
-    logger.info("Output json is generated!")
-
-    trial.write_output_images()
-    logger.info("Matching images are written!")
+        self.match_nway(self.args)
+        logger.info("Nway matching is done!")
+    
+        #self.write_matching_table()
+        #logger.info("Matching table is written!")
+    
+        #self.write_output_json(self.args['output_json'])
+        #logger.info("Output json is generated!")
+    
+        #self.write_output_images()
+        #logger.info("Matching images are written!")
 
 
 if __name__ == "__main__":
-
-    main()
+    nmod = NwayMatching()
+    nmod.run()

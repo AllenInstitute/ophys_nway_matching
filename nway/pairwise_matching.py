@@ -201,19 +201,17 @@ class ComputePairWiseMatch(object):
         self.segmask_fixed_3d = relabel(self.segmask_fixed_3d)
         self.segmask_moving_3d = relabel(self.segmask_moving_3d)
 
-        filename_segmask_fixed_relabel = \
-            self.dir_output + \
-            para_matching['filename_exp_prefix_fixed'] + \
-            '_maxInt_masks_relabel.tif'
+        filename_segmask_fixed_relabel = os.path.join(
+            self.dir_output,
+            para_matching['filename_exp_prefix_fixed'] + '_maxInt_masks_relabel.tif')
 
         sitk_segmask_fixed = sitk.GetImageFromArray(
             self.segmask_fixed_3d.astype(np.uint16))
         sitk.WriteImage(sitk_segmask_fixed, filename_segmask_fixed_relabel)
 
-        filename_segmask_moving_relabel = \
-            self.dir_output + \
-            para_matching['filename_exp_prefix_moving'] + \
-            '_maxInt_masks_relabel.tif'
+        filename_segmask_moving_relabel = os.path.join(
+            self.dir_output,
+            para_matching['filename_exp_prefix_moving'] + '_maxInt_masks_relabel.tif')
 
         sitk_segmask_moving = sitk.GetImageFromArray(
             self.segmask_moving_3d.astype(np.uint16))
@@ -350,10 +348,10 @@ class ComputePairWiseMatch(object):
             filename_prefix_fixed = \
                 filename_int_fixed[ind_fixed:ind_fixed + 26]
 
-            filename = \
-                self.dir_output + 'register_' + \
-                filename_prefix_moving + '_to_' + \
-                filename_prefix_fixed + '.tif'
+            filename = os.path.join(
+                self.dir_output,
+                'register_' + filename_prefix_moving +
+                '_to_' + filename_prefix_fixed + '.tif')
             sitk_img_moving_registered = sitk.GetImageFromArray(
                 img_moving_registered.astype(np.uint8))
             sitk.WriteImage(sitk_img_moving_registered, filename)
@@ -526,8 +524,8 @@ class ComputePairWiseMatch(object):
                 (len(para['filename_fixed']) > 0) &
                 (len(para['filename_moving']) > 0)):
 
-            para['filename_fixed'] = self.dir_output + para['filename_fixed']
-            para['filename_moving'] = self.dir_output + para['filename_moving']
+            para['filename_fixed'] = os.path.join(self.dir_output, para['filename_fixed'])
+            para['filename_moving'] = os.path.join(self.dir_output, para['filename_moving'])
 
             segmask_moving_3d_matching = np.zeros(
                     self.segmask_moving_3d_registered.shape)
@@ -658,13 +656,13 @@ class ComputePairWiseMatch(object):
         ''' Function that matches cells. '''
 
         # compute features
-        filename_weightmatrix = self.dir_output + 'weightmatrix.txt'
+        filename_weightmatrix = os.path.join(self.dir_output, 'weightmatrix.txt')
         fixed_fea, moving_fea, edge_fea = \
             self.compute_features(para, filename_weightmatrix)
 
         # Generate matching result by calling bipartite graph matching in c++
-        filename_tmpmatching = \
-            self.dir_output + 'matching_result_temporary.txt'
+        filename_tmpmatching = os.path.join(
+            self.dir_output, 'matching_result_temporary.txt')
 
         para_matching = dict()
 
@@ -688,8 +686,8 @@ class ComputePairWiseMatch(object):
 
         # write matching table
         if len(tmp_filenames['matching_table']) > 0:
-            filename_matching_table = \
-                self.dir_output + tmp_filenames['matching_table']
+            filename_matching_table = os.path.join(
+                self.dir_output, tmp_filenames['matching_table'])
             np.savetxt(
                 filename_matching_table,
                 self.matching_table,
