@@ -18,11 +18,14 @@ import SimpleITK as sitk
 from argschema import ArgSchemaParser, ArgSchema
 from argschema.fields import Boolean, Int, Str, Float
 
-import pairwise_matching as pm
-import region_properties as rp
+import nway.pairwise_matching as pm
+import nway.region_properties as rp
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
+
+def sum_me(a, b):
+    return a + b
 
 
 class CellMatchingParameters(ArgSchema):
