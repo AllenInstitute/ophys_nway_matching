@@ -1,5 +1,5 @@
 simpleitk
-argschema
+argschema<2.0
 numpy
 pillow
 scikit-image

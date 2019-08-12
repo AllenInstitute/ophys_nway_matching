@@ -1,6 +1,5 @@
 import pytest
-from ..nway import nway_matching_main
-
+from nway.nway_matching_main import main, sum_me
 
 def test_first_test():
-    assert (2 + 2) == 4
+    assert sum_me(2, 2) == 4

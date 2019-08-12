@@ -16,7 +16,7 @@ import matplotlib.pyplot as plt
 import SimpleITK as sitk
 import cv2
 
-import region_properties as rp
+import nway.region_properties as rp
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
