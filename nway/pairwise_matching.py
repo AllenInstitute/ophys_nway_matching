@@ -293,7 +293,9 @@ class ComputePairWiseMatch(object):
                 img_moving,
                 tform,
                 warp_mode,
-                criteria)
+                criteria,
+                inputMask=None,
+                gaussFiltSize=5)
 
         if warp_mode == cv2.MOTION_HOMOGRAPHY:
             # Use warpPerspective for Homography
