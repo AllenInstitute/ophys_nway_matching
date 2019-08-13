@@ -3,5 +3,5 @@ argschema<2.0
 numpy
 pillow
 scikit-image
-matplotlib
+matplotlib==1.5.3
 opencv-python==3.4.0.12
