@@ -58,3 +58,11 @@ def test_against_old_results(input_file):
     assert set(k1) == set(k2)
     for k in k1:
         assert np.all(j1['cell_rois'][k] == j2['cell_rois'][k])
+
+    # compare old matching table and new one
+    m1 = np.loadtxt(
+        os.path.join(os.path.dirname(input_file), "matching_result.txt"))
+    m2 = np.loadtxt(
+        os.path.join(thistest, "matching_result.txt"))
+
+    assert np.all(m1 == m2)
