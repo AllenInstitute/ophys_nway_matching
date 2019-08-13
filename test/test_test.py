@@ -9,9 +9,9 @@ TEST_FILE_DIR = os.path.join(
         os.path.dirname(os.path.abspath(__file__)),
         'test_files')
 
+
 @pytest.fixture(scope='function')
 def input_file(tmpdir):
-    basename = '782536745_ophys_cell_matching_input.json'
     thistest = os.path.join(TEST_FILE_DIR, 'test0')
     myinput = os.path.join(thistest, 'input.json')
     with open(myinput, 'r') as f:
@@ -38,8 +38,10 @@ def test_against_old_results(input_file):
 
     args = {}
     args['input_json'] = input_file
-    args['munkres_executable'] = '/shared/bioapps/infoapps/lims2_modules/CAM/ophys_ophys_registration/bp_matching'
-    args['output_json'] = os.path.join(os.path.dirname(input_file), 'output.json')
+    args['munkres_executable'] = ("/shared/bioapps/infoapps/lims2_modules/"
+                                  "CAM/ophys_ophys_registration/bp_matching")
+    args['output_json'] = os.path.join(
+            os.path.dirname(input_file), 'output.json')
     n = NwayMatching(input_data=args, args=[])
     n.run()
 
