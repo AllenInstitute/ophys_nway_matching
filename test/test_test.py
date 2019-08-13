@@ -64,5 +64,4 @@ def test_against_old_results(input_file):
         os.path.join(os.path.dirname(input_file), "matching_result.txt"))
     m2 = np.loadtxt(
         os.path.join(thistest, "matching_result.txt"))
-
     assert np.all(m1 == m2)
