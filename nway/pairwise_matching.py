@@ -15,6 +15,7 @@ from skimage import measure as ms
 import matplotlib.pyplot as plt
 import SimpleITK as sitk
 import cv2
+import scipy.spatial
 
 import nway.region_properties as rp
 
@@ -445,24 +446,14 @@ class ComputePairWiseMatch(object):
 
         # compute features of bipartite graph edges
         edge_fea = dict()
-        edge_fea['dist'] = np.zeros(
-                (fixed_fea['cellnum'], moving_fea['cellnum']))
         edge_fea['overlap'] = np.zeros(
                 (fixed_fea['cellnum'], moving_fea['cellnum']))
 
-        for i in range(0, fixed_fea['cellnum']):
-            # compute pair-wise distances between cell centers
-            for j in range(0, moving_fea['cellnum']):
-                edge_fea['dist'][i, j] = np.sqrt(
-                    (fixed_fea['centers'][i, 0] -
-                        moving_fea['centers'][j, 0]) *
-                    (fixed_fea['centers'][i, 0] -
-                        moving_fea['centers'][j, 0]) +
-                    (fixed_fea['centers'][i, 1] -
-                        moving_fea['centers'][j, 1]) *
-                    (fixed_fea['centers'][i, 1] -
-                        moving_fea['centers'][j, 1]))
+        # compute pair-wise distances between cell centers
+        edge_fea['dist'] = scipy.spatial.distance.cdist(
+                fixed_fea['centers'], moving_fea['centers'])
 
+        for i in range(0, fixed_fea['cellnum']):
             segmask_fixed_this_layer = self.segmask_fixed_3d[
                     pixelidxlist_fixed[fixed_fea['labels'][i]][0, 0], :, :]
             cellmask_fixed = (segmask_fixed_this_layer == i + 1)
