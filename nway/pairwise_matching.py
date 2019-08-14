@@ -454,7 +454,7 @@ class ComputePairWiseMatch(object):
 
         # compute pair-wise distances between cell centers
         edge_fea['dist'] = scipy.spatial.distance.cdist(
-                fixed_fea['centers'], moving_fea['centers'])
+                fixed_fea['centers'], moving_fea['centers'], 'euclidean')
 
         for i in range(0, fixed_fea['cellnum']):
             segmask_fixed_this_layer = self.segmask_fixed_3d[
