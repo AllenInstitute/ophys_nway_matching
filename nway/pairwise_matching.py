@@ -6,6 +6,7 @@ Pair-wise matching called by nway matching main function
 Copyright (c) Allen Institute for Brain Science
 """
 import os
+import re
 import logging
 import subprocess
 import shlex
@@ -17,8 +18,10 @@ import SimpleITK as sitk
 import cv2
 import scipy.spatial
 import scipy.optimize
+from argschema import ArgSchemaParser
 
 import nway.region_properties as rp
+from nway.schemas import PairwiseMatchingSchema
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -70,7 +73,7 @@ def imshow3d(img3d, display_row_num, display_col_num):
 def read_tiff_3d(filename):
     '''Read 3d tiff files. '''
 
-    img = sitk.ReadImage(filename)
+    img = sitk.ReadImage(filename.encode('utf-8'))
     dim = img.GetDimension()
 
     if (dim != 2) and (dim != 3):
@@ -120,39 +123,44 @@ def remove_tmp_files(filename):
         os.remove(filename)
 
 
-class ComputePairWiseMatch(object):
+class PairwiseMatching(ArgSchemaParser):
+    default_schema = PairwiseMatchingSchema
     ''' Class for pairwise ophys matching.
 
         Images are registered using intensity correlation.
         Best matches between cells are determined by bipartite graph matching.
     '''
 
-    def __init__(self, dir_output):
-
-        self.dir_output = dir_output
+    def run(self):
+        self.dir_output = self.args['output_directory']
         self.segmask_fixed_3d = np.array([])
         self.segmask_moving_3d = np.array([])
         self.segmask_moving_3d_registered = np.array([])
         self.matching_table = np.array([])
         self.segmask_fixed_3d_sz = 0
         self.segmask_moving_3d_sz = 0
+        return self.match_pairs()
 
-    def match_pairs(self, para, para_matching):
+    def match_pairs(self):
         ''' Pairwise matching of ophys-ophys sessions. '''
 
         filename_output_fixed_matched_img = ''
         filename_output_moving_matched_img = ''
 
-        filename_matching_table = \
-            para_matching['filename_exp_prefix_fixed'] + \
-            '_to_' + \
-            para_matching['filename_exp_prefix_moving']
+        pre_fixed = re.findall(
+                self.args['id_pattern'],
+                self.args['filename_intensity_fixed'])[0]
+        pre_movin = re.findall(
+                self.args['id_pattern'],
+                self.args['filename_intensity_moving'])[0]
+
+        filename_matching_table = pre_fixed + '_to_' + pre_movin
 
         # register the average intensity images
-        tform = self.register_intensity_images(
-                para,
-                para_matching['filename_intensity_fixed'],
-                para_matching['filename_intensity_moving'])
+        tform = self.register_intensity_images()
+                #self.args,
+                #self.args['filename_intensity_fixed'],
+                #self.args['filename_intensity_moving'])
 
         # read segmentation masks
         (
@@ -160,13 +168,13 @@ class ComputePairWiseMatch(object):
                 col_segmask_fixed_3d,
                 row_segmask_fixed_3d,
                 dep_segmask_fixed_3d) = read_tiff_3d(
-                        para_matching['filename_segmask_fixed'])
+                        self.args['filename_segmask_fixed'])
         (
                 self.segmask_moving_3d,
                 col_segmask_moving_3d,
                 row_segmask_moving_3d,
                 dep_segmask_moving_3d) = read_tiff_3d(
-                        para_matching['filename_segmask_moving'])
+                        self.args['filename_segmask_moving'])
 
         # switch row and col of segmasks
         segmask_fixed_3d_tmp = np.zeros(
@@ -205,8 +213,8 @@ class ComputePairWiseMatch(object):
 
         filename_segmask_fixed_relabel = os.path.join(
             self.dir_output,
-            para_matching['filename_exp_prefix_fixed'] +
-            '_maxInt_masks_relabel.tif')
+            pre_fixed +
+            '_maxInt_masks_relabel.tif').encode('utf-8')
 
         sitk_segmask_fixed = sitk.GetImageFromArray(
             self.segmask_fixed_3d.astype(np.uint16))
@@ -214,14 +222,14 @@ class ComputePairWiseMatch(object):
 
         filename_segmask_moving_relabel = os.path.join(
             self.dir_output,
-            para_matching['filename_exp_prefix_moving'] +
-            '_maxInt_masks_relabel.tif')
+            pre_movin +
+            '_maxInt_masks_relabel.tif').encode('utf-8')
 
         sitk_segmask_moving = sitk.GetImageFromArray(
             self.segmask_moving_3d.astype(np.uint16))
         sitk.WriteImage(sitk_segmask_moving, filename_segmask_moving_relabel)
 
-        if para['diagnostic_figures'] == 1:
+        if self.args['diagnostic_figures'] == 1:
             imshow3d(self.segmask_fixed_3d, 1, self.segmask_fixed_3d_sz[0])
             imshow3d(self.segmask_moving_3d, 1, self.segmask_moving_3d_sz[0])
 
@@ -229,7 +237,7 @@ class ComputePairWiseMatch(object):
         # compute self.segmask_moving_3d_registered
         self.register_mask_images(tform)
 
-        if para['diagnostic_figures'] == 1:
+        if self.args['diagnostic_figures'] == 1:
             imshow3d(
                     self.segmask_moving_3d_registered,
                     1,
@@ -244,7 +252,7 @@ class ComputePairWiseMatch(object):
         tmp_filenames['matching_table'] = filename_matching_table
 
         [matching_ratio_fixed, matching_ratio_moving, weight_matrix] = \
-            self.cell_matching(para, tmp_filenames)
+            self.cell_matching(tmp_filenames)
 
         matching_pairs = dict()
         matching_pairs['res'] = self.matching_table
@@ -253,8 +261,8 @@ class ComputePairWiseMatch(object):
         matching_pairs['segmask_i'] = self.segmask_fixed_3d
         matching_pairs['segmask_j'] = self.segmask_moving_3d_registered
         matching_pairs['weight_matrix'] = weight_matrix
-        matching_pairs['moving'] = para_matching['filename_intensity_moving']
-        matching_pairs['fixed'] = para_matching['filename_intensity_fixed']
+        matching_pairs['moving'] = self.args['filename_intensity_moving']
+        matching_pairs['fixed'] = self.args['filename_intensity_fixed']
 
         # if affine only, output full 3x3
         if tform.shape == (2, 3):
@@ -264,14 +272,14 @@ class ComputePairWiseMatch(object):
 
         return matching_pairs
 
-    def register_intensity_images(
-            self, para, filename_int_fixed, filename_int_moving):
+    def register_intensity_images(self):
+            #self, filename_int_fixed, filename_int_moving):
         ''' Register the average intensity images of the two ophys
             sessions using affine transformation'''
 
         # read average intensity images
-        img_fixed = np.array(im.open(filename_int_fixed))
-        img_moving = np.array(im.open(filename_int_moving))
+        img_fixed = np.array(im.open(self.args['filename_intensity_fixed']))
+        img_moving = np.array(im.open(self.args['filename_intensity_moving']))
 
         # Find size of img_fixed
         sz_fixed = np.shape(img_fixed)
@@ -288,8 +296,8 @@ class ComputePairWiseMatch(object):
         # Define termination criteria
         criteria = (
                 cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT,
-                para['registration_iterations'],
-                para['registration_precision'])
+                self.args['registration_iterations'],
+                self.args['registration_precision'])
 
         # Run the ECC algorithm. The results are stored in warp_matrix.
         (ccval, tform) = cv2.findTransformECC(
@@ -321,7 +329,7 @@ class ComputePairWiseMatch(object):
                 flags=cv2.INTER_LINEAR +
                 cv2.WARP_INVERSE_MAP)
 
-        if para['diagnostic_figures'] == 1:
+        if self.args['diagnostic_figures'] == 1:
 
             sz0, sz1 = np.shape(img_fixed)
             img_overlay_ori = np.zeros((sz0, sz1, 3), np.uint8)
@@ -345,20 +353,19 @@ class ComputePairWiseMatch(object):
             figs.add_subplot(235)
             plt.imshow(img_overlay)
 
-        if para['save_registered_image'] == 1:
+        if self.args['save_registered_image'] == 1:
 
-            ind_moving = filename_int_moving.find('ophys_experiment_')
-            ind_fixed = filename_int_fixed.find('ophys_experiment_')
-
-            filename_prefix_moving = \
-                filename_int_moving[ind_moving:ind_moving + 26]
-            filename_prefix_fixed = \
-                filename_int_fixed[ind_fixed:ind_fixed + 26]
+            filename_prefix_moving = re.findall(
+                    self.args['id_pattern'],
+                    self.args['filename_intensity_moving'])[0]
+            filename_prefix_fixed = re.findall(
+                    self.args['id_pattern'],
+                    self.args['filename_intensity_fixed'])[0]
 
             filename = os.path.join(
                 self.dir_output,
                 'register_' + filename_prefix_moving +
-                '_to_' + filename_prefix_fixed + '.tif')
+                '_to_' + filename_prefix_fixed + '.tif').encode('utf-8')
             sitk_img_moving_registered = sitk.GetImageFromArray(
                 img_moving_registered.astype(np.uint8))
             sitk.WriteImage(sitk_img_moving_registered, filename)
@@ -411,7 +418,7 @@ class ComputePairWiseMatch(object):
 
         return self.segmask_moving_3d_registered
 
-    def compute_features(self, para, filename_weightmatrix):
+    def compute_features(self, filename_weightmatrix):
         ''' Computer features and weight matrix needed for
             bipartite graph matching.'''
 
@@ -488,7 +495,7 @@ class ComputePairWiseMatch(object):
                         area_intersection / area_union
 
         dist2 = np.copy(edge_fea['dist'])
-        dist2 = dist2 / para['maximum_distance']
+        dist2 = dist2 / self.args['maximum_distance']
         dist2[dist2 > 1] = 999.0
         # overlap2 = \
         #        1 - \
@@ -497,7 +504,7 @@ class ComputePairWiseMatch(object):
         overlap2 = 1 - edge_fea['overlap'].astype(float)
         edge_fea['weight_matrix'] = dist2 + overlap2
 
-        if para['diagnostic_figures'] == 1:
+        if self.args['diagnostic_figures'] == 1:
             figs = plt.figure()
             figs.add_subplot(221)
             plt.imshow(dist2, cmap='gray')
@@ -522,9 +529,9 @@ class ComputePairWiseMatch(object):
                 (len(para['filename_moving']) > 0)):
 
             para['filename_fixed'] = os.path.join(
-                self.dir_output, para['filename_fixed'])
+                self.dir_output, self.args['filename_fixed'])
             para['filename_moving'] = os.path.join(
-                self.dir_output, para['filename_moving'])
+                self.dir_output, self.args['filename_moving'])
 
             segmask_moving_3d_matching = np.zeros(
                     self.segmask_moving_3d_registered.shape)
@@ -554,12 +561,12 @@ class ComputePairWiseMatch(object):
                     segmask_moving_3d_matching.astype(np.uint16))
             sitk.WriteImage(sitk_img2, para['filename_moving'])
 
-    def gen_matching_table(self, para, para_matching):
+    def gen_matching_table(self, para_matching):
         '''Generate self.matching_table using bipartite graph matching.'''
 
-        if para['munkres_executable']:
+        if self.args['munkres_executable']:
             # C++
-            tool_name_args = [para['munkres_executable'] + " " +
+            tool_name_args = [self.args['munkres_executable'] + " " +
                       para_matching['filename_weightmatrix'] + " " +
                       str(para_matching['fixed_cellnum']) + " " +
                       str(para_matching['moving_cellnum']) + " " +
@@ -597,7 +604,7 @@ class ComputePairWiseMatch(object):
             elif para_matching['edge_fea']['dist'][
                     int(matching_pair[ind[0][0], 0]),
                     int(matching_pair[ind[0][0], 1])] >= \
-                    para['maximum_distance']:
+                    self.args['maximum_distance']:
                 # revent cells too far from matching even
                 # if matching_pair match them
                 count = count + 1
@@ -611,7 +618,7 @@ class ComputePairWiseMatch(object):
                 if para_matching['edge_fea']['dist'][
                         int(matching_pair[ind[0], 0][0]),
                         int(matching_pair[ind[0], 1][0])] < \
-                        para['maximum_distance']:
+                        self.args['maximum_distance']:
                     # label index starts from 0, but label value starts from 1,
                     self.matching_table[i, 0] = matching_pair[ind, 0] + 1
                     self.matching_table[i, 1] = matching_pair[ind, 1] + 1
@@ -661,14 +668,14 @@ class ComputePairWiseMatch(object):
 
         return num_matched
 
-    def cell_matching(self, para, tmp_filenames):
+    def cell_matching(self, tmp_filenames):
         ''' Function that matches cells. '''
 
         # compute features
         filename_weightmatrix = os.path.join(
             self.dir_output, 'weightmatrix.txt')
         fixed_fea, moving_fea, edge_fea = \
-            self.compute_features(para, filename_weightmatrix)
+            self.compute_features(filename_weightmatrix)
 
         # Generate matching result by calling bipartite graph matching in c++
         filename_tmpmatching = os.path.join(
@@ -682,7 +689,7 @@ class ComputePairWiseMatch(object):
         para_matching['moving_cellnum'] = moving_fea['cellnum']
         para_matching['edge_fea'] = edge_fea
 
-        num_matched = self.gen_matching_table(para, para_matching)
+        num_matched = self.gen_matching_table(para_matching)
 
         # write matching images, matched cells are given the same label
         # unmatched cells are not labeled in the image
@@ -715,3 +722,7 @@ class ComputePairWiseMatch(object):
                 matching_ratio_fixed,
                 matching_ratio_moving,
                 edge_fea['weight_matrix'])
+
+if __name__ == "__main__":
+    pmod = PairwiseMatching()
+    pmod.run()

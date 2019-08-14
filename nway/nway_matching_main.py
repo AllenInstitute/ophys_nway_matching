@@ -15,7 +15,8 @@ import json
 import numpy as np
 import SimpleITK as sitk
 import os
-import nway.pairwise_matching as pm
+import re
+from nway.pairwise_matching import PairwiseMatching, read_tiff_3d
 import nway.region_properties as rp
 from nway.schemas import NwayMatchingSchema
 from argschema import ArgSchemaParser
@@ -109,9 +110,8 @@ class NwayMatching(ArgSchemaParser):
                 str(
                     this_exp['ophys_average_intensity_projection_image'])
             self.filename_segmask[i] = str(this_exp['max_int_mask_image'])
-            ind = self.filename_intensity[i].find('ophys_experiment_')
-            self.filename_exp_prefix[i] = \
-                self.filename_intensity[i][ind:ind + 26]
+            self.filename_exp_prefix[i] = re.findall(
+                    self.args['id_pattern'], self.filename_intensity[i])[0]
 
         logger.debug('Intensity images are: ', self.filename_intensity)
         logger.debug('Cell mask images are: ', self.filename_segmask)
@@ -467,7 +467,7 @@ class NwayMatching(ArgSchemaParser):
                 self.dir_output,
                 self.filename_exp_prefix[k] + '_maxInt_masks_relabel.tif')
             segmask_3d, col_segmask, row_segmask, dep_segmask = \
-                pm.read_tiff_3d(filename_segmask_relabel)
+                read_tiff_3d(filename_segmask_relabel)
 
             # switch row and col of segmasks
             segmask_3d_tmp = np.zeros(
@@ -498,14 +498,14 @@ class NwayMatching(ArgSchemaParser):
 
         for i in range(self.expnum - 1):
 
-            para_matching = dict()
+            para_matching = dict(self.args)
             para_matching['filename_intensity_fixed'] = \
                 self.filename_intensity[i]
             para_matching['filename_segmask_fixed'] = self.filename_segmask[i]
 
-            ind = self.filename_intensity[i].find('ophys_experiment_')
-            para_matching['filename_exp_prefix_fixed'] = \
-                self.filename_intensity[i][ind:ind + 26]
+            para_matching['filename_exp_prefix_fixed'] = re.findall(
+                self.args['id_pattern'], self.filename_intensity[i])[0]
+            para_matching['output_directory'] = self.dir_output
 
             for j in range(i + 1, self.expnum):
 
@@ -518,13 +518,14 @@ class NwayMatching(ArgSchemaParser):
                         'Matching %s against %s ...' % (
                             para_matching['filename_intensity_moving'],
                             para_matching['filename_intensity_fixed']))
-                matching = pm.ComputePairWiseMatch(self.dir_output)
+                matching = PairwiseMatching(input_data=para_matching, args=[])
+                matching_pair = matching.run()
 
-                ind = self.filename_intensity[j].find('ophys_experiment_')
-                para_matching['filename_exp_prefix_moving'] = \
-                    self.filename_intensity[j][ind:ind + 26]
+                #ind = self.filename_intensity[j].find('ophys_experiment_')
+                #para_matching['filename_exp_prefix_moving'] = \
+                #    self.filename_intensity[j][ind:ind + 26]
 
-                matching_pair = matching.match_pairs(para, para_matching)
+                #matching_pair = matching.match_pairs(para, para_matching)
                 print(matching_pair)
 
                 self.matching_res_dict.append(matching_pair)

@@ -30,7 +30,7 @@ def input_file(tmpdir):
 @pytest.mark.parametrize(
         "exe",
         [
-            None,
+            #None,
             ("/shared/bioapps/infoapps/lims2_modules/"
              "CAM/ophys_ophys_registration/bp_matching")])
 def test_against_old_results(input_file, exe):

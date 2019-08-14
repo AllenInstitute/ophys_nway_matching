@@ -1,5 +1,7 @@
 from argschema import ArgSchema
-from argschema.fields import Boolean, Int, Str, Float
+from argschema.fields import (
+        Boolean, Int, Str, Float,
+        InputFile, OutputDir)
 
 
 class NwayMatchingSchema(ArgSchema):
@@ -34,3 +36,28 @@ class NwayMatchingSchema(ArgSchema):
         default=None,
         description=("Executable of Kuhn-Munkres algorithm for bipartite"
                      "graph matching with path information"))
+    id_pattern = Str(
+        required=False,
+        missing='ophys_experiment_\d+',
+        default='ophys_experiment_\d+',
+        description=("passed to re.findall() as search pattern "
+                     "on the input intensity filename and used "
+                     "for naming intermediate and output files. "))
+
+
+class PairwiseMatchingSchema(NwayMatchingSchema):
+    filename_intensity_fixed = InputFile(
+        required=True,
+        description="path to fixed intensity image")
+    filename_segmask_fixed = InputFile(
+        required=True,
+        description="path to fixed segmentation mask")
+    filename_intensity_moving = InputFile(
+        required=True,
+        description="path to moving intensity image")
+    filename_segmask_moving = InputFile(
+        required=True,
+        description="path to moving segmentation mask")
+    output_directory = OutputDir(
+        required=True,
+        description="destination for output files")
