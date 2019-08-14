@@ -52,10 +52,6 @@ class CellMatchingParameters(ArgSchema):
         default=1.5e-7,
         description=("Threshold of squared error, below which "
                      "registration is terminated"))
-    munkres_executable = Str(
-        required=True,
-        description=("Executable of Kuhn-Munkres algorithm for bipartite"
-                     "graph matching with path information"))
 
 
 def parse_command_line():

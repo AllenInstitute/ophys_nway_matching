@@ -7,8 +7,6 @@ Copyright (c) Allen Institute for Brain Science
 """
 import os
 import logging
-import subprocess
-import shlex
 import numpy as np
 from PIL import Image as im
 from skimage import measure as ms
@@ -16,6 +14,7 @@ import matplotlib.pyplot as plt
 import SimpleITK as sitk
 import cv2
 import scipy.spatial
+import scipy.optimize
 
 import nway.region_properties as rp
 
@@ -103,13 +102,6 @@ def relabel(maskimg_3d):
         labeloffset = np.amax(labelimg)
 
     return maskimg_3d
-
-
-def run_bipartite_matching(tool_name_args):
-    ''' call c++ executable.'''
-
-    args = shlex.split(tool_name_args[0])
-    subprocess.check_call(args)
 
 
 def remove_tmp_files(filename):
@@ -204,7 +196,8 @@ class ComputePairWiseMatch(object):
 
         filename_segmask_fixed_relabel = os.path.join(
             self.dir_output,
-            para_matching['filename_exp_prefix_fixed'] + '_maxInt_masks_relabel.tif')
+            para_matching['filename_exp_prefix_fixed'] +
+            '_maxInt_masks_relabel.tif')
 
         sitk_segmask_fixed = sitk.GetImageFromArray(
             self.segmask_fixed_3d.astype(np.uint16))
@@ -212,7 +205,8 @@ class ComputePairWiseMatch(object):
 
         filename_segmask_moving_relabel = os.path.join(
             self.dir_output,
-            para_matching['filename_exp_prefix_moving'] + '_maxInt_masks_relabel.tif')
+            para_matching['filename_exp_prefix_moving'] +
+            '_maxInt_masks_relabel.tif')
 
         sitk_segmask_moving = sitk.GetImageFromArray(
             self.segmask_moving_3d.astype(np.uint16))
@@ -295,9 +289,9 @@ class ComputePairWiseMatch(object):
                 tform,
                 warp_mode,
                 criteria)
-                # for opencv 4.0:
-                #inputMask=None,
-                #gaussFiltSize=5)
+        # for opencv 4.0:
+        # inputMask=None,
+        # gaussFiltSize=5)
 
         if warp_mode == cv2.MOTION_HOMOGRAPHY:
             # Use warpPerspective for Homography
@@ -518,8 +512,10 @@ class ComputePairWiseMatch(object):
                 (len(para['filename_fixed']) > 0) &
                 (len(para['filename_moving']) > 0)):
 
-            para['filename_fixed'] = os.path.join(self.dir_output, para['filename_fixed'])
-            para['filename_moving'] = os.path.join(self.dir_output, para['filename_moving'])
+            para['filename_fixed'] = os.path.join(
+                self.dir_output, para['filename_fixed'])
+            para['filename_moving'] = os.path.join(
+                self.dir_output, para['filename_moving'])
 
             segmask_moving_3d_matching = np.zeros(
                     self.segmask_moving_3d_registered.shape)
@@ -552,18 +548,11 @@ class ComputePairWiseMatch(object):
     def gen_matching_table(self, para, para_matching):
         '''Generate self.matching_table using bipartite graph matching.'''
 
-        tool_name_args = [para['munkres_executable'] + " " +
-                          para_matching['filename_weightmatrix'] + " " +
-                          str(para_matching['fixed_cellnum']) + " " +
-                          str(para_matching['moving_cellnum']) + " " +
-                          para_matching['filename_tmpmatching']]
-
-        run_bipartite_matching(tool_name_args)
-
-        # load matching result produced by bp_matching
-        matching_pair = np.loadtxt(
-                para_matching['filename_tmpmatching'],
-                delimiter=' ').astype(int)
+        matching_pair = np.transpose(
+                np.array(
+                    scipy.optimize.linear_sum_assignment(
+                        np.loadtxt(
+                            para_matching['filename_weightmatrix']))))
 
         # remove pairs that do not satisfy distance condition
         # matching_num is the smaller value of the number of regions in fixed
@@ -650,7 +639,8 @@ class ComputePairWiseMatch(object):
         ''' Function that matches cells. '''
 
         # compute features
-        filename_weightmatrix = os.path.join(self.dir_output, 'weightmatrix.txt')
+        filename_weightmatrix = os.path.join(
+            self.dir_output, 'weightmatrix.txt')
         fixed_fea, moving_fea, edge_fea = \
             self.compute_features(para, filename_weightmatrix)
 

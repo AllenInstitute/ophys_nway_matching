@@ -38,8 +38,6 @@ def test_against_old_results(input_file):
 
     args = {}
     args['input_json'] = input_file
-    args['munkres_executable'] = ("/shared/bioapps/infoapps/lims2_modules/"
-                                  "CAM/ophys_ophys_registration/bp_matching")
     args['output_json'] = os.path.join(
             os.path.dirname(input_file), 'output.json')
     n = NwayMatching(input_data=args, args=[])
