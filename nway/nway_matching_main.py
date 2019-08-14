@@ -15,67 +15,22 @@ import json
 import numpy as np
 import SimpleITK as sitk
 import os
-
-from argschema import ArgSchemaParser, ArgSchema
-from argschema.fields import Boolean, Int, Str, Float
-
 import nway.pairwise_matching as pm
 import nway.region_properties as rp
+from nway.schemas import NwayMatchingSchema
+from argschema import ArgSchemaParser
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
 
-class CellMatchingParameters(ArgSchema):
-    ''' Class that uses argschema to take care of input arguments '''
-
-    save_registered_image = Boolean(
-        required=False,
-        default=True,
-        description='Whether to save registered image.')
-    maximum_distance = Int(
-        required=False,
-        default=10,
-        description=("Maximum distance (in pixels) between two cells,"
-                     " above which a match is always rejected."))
-    diagnostic_figures = Boolean(
-        required=False,
-        default=False,
-        desciption='Plot diagnostic figures.')
-    registration_iterations = Int(
-        required=False,
-        default=1000,
-        description=("Number of iterations for intensity-"
-                     "based registration"))
-    registration_precision = Float(
-        required=False,
-        default=1.5e-7,
-        description=("Threshold of squared error, below which "
-                     "registration is terminated"))
-    munkres_executable = Str(
-        required=False,
-        missing=None,
-        default=None,
-        description=("Executable of Kuhn-Munkres algorithm for bipartite"
-                     "graph matching with path information"))
-
-
-def parse_command_line():
-    ''' Parse command line using ArgSchemaParser to get input parameters. '''
-
-    mod = ArgSchemaParser(schema_type=CellMatchingParameters)
-    return mod.args
-
-
 class NwayMatching(ArgSchemaParser):
-    default_schema = CellMatchingParameters
-
+    default_schema = NwayMatchingSchema
     ''' Class for matching cells across arbitrary number of ophys sessions.
 
         Necessary files are obtained by parsing input json. Final Nway matching
         result is obtained by combining pairwise matching.
     '''
-
 
     def parse_jsons_with_reference_keyword(self, input_json):
         ''' Parse input json file to genearte the necessary input files
@@ -451,7 +406,8 @@ class NwayMatching(ArgSchemaParser):
         ''' Write the final matching table that include all the cells in N sessions.
             Each row is one matching. It has N+1 entries. -1 means no match.
             The last entry is the unified label of the cells.'''
-        filename_matching_table = os.path.join(self.dir_output, 'matching_result.txt')
+        filename_matching_table = os.path.join(
+            self.dir_output, 'matching_result.txt')
         np.savetxt(
                 filename_matching_table,
                 self.matching_table_nway,
@@ -609,23 +565,13 @@ class NwayMatching(ArgSchemaParser):
 
         return
 
-
     def run(self):
         ''' Main function of nway cell matching across multiple ophys sessions.
-    
             The method takes three step:
             1) Image registration;
             2) Pairwise matching;
             3) Combining pairwise matching to generate Nway result.
         '''
-    
-        #para = parse_command_line()
-    
-        #trial = NwayMatching()
-    
-        # call parse_jsons_with_reference_keyword() for old json format
-        #trial.parse_jsons(para['input_json'])
-        #logger.info('Parsing input json is done!')
 
         self.dir_output = ""
         self.filename_intensity = []
@@ -641,13 +587,13 @@ class NwayMatching(ArgSchemaParser):
 
         self.match_nway(self.args)
         logger.info("Nway matching is done!")
-    
+
         self.write_matching_table()
         logger.info("Matching table is written!")
-    
+
         self.write_output_json(self.args['output_json'])
         logger.info("Output json is generated!")
-    
+
         self.write_output_images()
         logger.info("Matching images are written!")
 
