@@ -7,6 +7,8 @@ Copyright (c) Allen Institute for Brain Science
 """
 import os
 import logging
+import subprocess
+import shlex
 import numpy as np
 from PIL import Image as im
 from skimage import measure as ms
@@ -102,6 +104,13 @@ def relabel(maskimg_3d):
         labeloffset = np.amax(labelimg)
 
     return maskimg_3d
+
+
+def run_bipartite_matching(tool_name_args):
+    ''' call c++ executable.'''
+
+    args = shlex.split(tool_name_args[0])
+    subprocess.check_call(args)
 
 
 def remove_tmp_files(filename):
@@ -548,11 +557,28 @@ class ComputePairWiseMatch(object):
     def gen_matching_table(self, para, para_matching):
         '''Generate self.matching_table using bipartite graph matching.'''
 
-        matching_pair = np.transpose(
-                np.array(
-                    scipy.optimize.linear_sum_assignment(
-                        np.loadtxt(
-                            para_matching['filename_weightmatrix']))))
+        if para['munkres_executable']:
+            # C++
+            tool_name_args = [para['munkres_executable'] + " " +
+                      para_matching['filename_weightmatrix'] + " " +
+                      str(para_matching['fixed_cellnum']) + " " +
+                      str(para_matching['moving_cellnum']) + " " +
+                      para_matching['filename_tmpmatching']]
+
+            run_bipartite_matching(tool_name_args)
+
+            # load matching result produced by bp_matching
+            matching_pair = np.loadtxt(
+                    para_matching['filename_tmpmatching'],
+                    delimiter=' ').astype(int)
+
+        else:
+            # scipy
+            matching_pair = np.transpose(
+                    np.array(
+                        scipy.optimize.linear_sum_assignment(
+                            np.loadtxt(
+                                para_matching['filename_weightmatrix']))))
 
         # remove pairs that do not satisfy distance condition
         # matching_num is the smaller value of the number of regions in fixed

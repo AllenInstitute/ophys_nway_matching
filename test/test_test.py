@@ -27,7 +27,13 @@ def input_file(tmpdir):
     yield input_json
 
 
-def test_against_old_results(input_file):
+@pytest.mark.parametrize(
+        "exe",
+        [
+            None,
+            ("/shared/bioapps/infoapps/lims2_modules/"
+             "CAM/ophys_ophys_registration/bp_matching")])
+def test_against_old_results(input_file, exe):
     assert os.path.isfile(input_file)
     with open(input_file, 'r') as f:
         j = json.load(f)
@@ -40,6 +46,7 @@ def test_against_old_results(input_file):
     args['input_json'] = input_file
     args['output_json'] = os.path.join(
             os.path.dirname(input_file), 'output.json')
+    args['munkres_executable'] = exe
     n = NwayMatching(input_data=args, args=[])
     n.run()
 
