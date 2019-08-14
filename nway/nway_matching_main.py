@@ -466,18 +466,10 @@ class NwayMatching(ArgSchemaParser):
             filename_segmask_relabel = os.path.join(
                 self.dir_output,
                 self.filename_exp_prefix[k] + '_maxInt_masks_relabel.tif')
-            segmask_3d, col_segmask, row_segmask, dep_segmask = \
+            segmask_3d = \
                 read_tiff_3d(filename_segmask_relabel)
 
-            # switch row and col of segmasks
-            segmask_3d_tmp = np.zeros(
-                    (dep_segmask, row_segmask, col_segmask),
-                    dtype=np.int)
-            for i in range(dep_segmask):
-                segmask_3d_tmp[i, :, :] = np.transpose(segmask_3d[i, :, :])
-            segmask_3d = np.copy(segmask_3d_tmp)
-
-            matching_mask = np.zeros((dep_segmask, row_segmask, col_segmask))
+            matching_mask = np.zeros(segmask_3d.shape)
             linenum = np.shape(self.matching_table_nway)[0]
 
             for i in range(linenum):
@@ -520,13 +512,6 @@ class NwayMatching(ArgSchemaParser):
                             para_matching['filename_intensity_fixed']))
                 matching = PairwiseMatching(input_data=para_matching, args=[])
                 matching_pair = matching.run()
-
-                #ind = self.filename_intensity[j].find('ophys_experiment_')
-                #para_matching['filename_exp_prefix_moving'] = \
-                #    self.filename_intensity[j][ind:ind + 26]
-
-                #matching_pair = matching.match_pairs(para, para_matching)
-                print(matching_pair)
 
                 self.matching_res_dict.append(matching_pair)
 

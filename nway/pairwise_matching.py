@@ -29,6 +29,78 @@ logger.setLevel(logging.INFO)
 plt.ion()
 
 
+def transform_masks(moving, dst_shape, tform):
+    ''' Transform segmentation masks using the affine
+        transformation defined by tform'''
+
+    transformed_3d = np.zeros(
+            (
+                moving.shape[0],
+                dst_shape[0],
+                dst_shape[1]),
+            dtype=np.int)
+
+    print(transformed_3d.shape, moving.shape)
+
+    for k, frame in enumerate(moving):
+        print(k, frame.shape)
+        labels = np.unique(frame)
+        transformed_2d = np.zeros(dst_shape)
+
+        for label in labels:
+            tmp = np.zeros_like(frame).astype('float32')
+            tmp[frame == label] = 1
+            tmp_registered = cv2.warpAffine(
+                    tmp,
+                    tform,
+                    dst_shape[::-1],
+                    flags=cv2.INTER_LINEAR + cv2.WARP_INVERSE_MAP)
+
+            transformed_2d[tmp_registered > 0] = label
+
+        transformed_3d[k, :, :] = transformed_2d
+
+    return transformed_3d
+
+
+def register_intensity_images(
+        img_path_fixed, img_path_moving, maxCount, epsilon, warpimage=True):
+    ''' Register the average intensity images of the two ophys
+        sessions using affine transformation'''
+
+    # read average intensity images
+    img_fixed = np.array(im.open(img_path_fixed))
+    img_moving = np.array(im.open(img_path_moving))
+
+    # Define termination criteria
+    criteria = (
+            cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT,
+            maxCount,
+            epsilon)
+
+    try:
+        # Run the ECC algorithm. The results are stored in warp_matrix.
+        ccval, tform = cv2.findTransformECC(
+                img_fixed,
+                img_moving,
+                np.eye(2, 3, dtype=np.float32),
+                cv2.MOTION_AFFINE,
+                criteria)
+    except cv2.error:
+        logger.error("failed to align images {} and {}".format(
+            img_path_fixed,
+            img_path_moving))
+        raise
+
+    img_moving_warped = cv2.warpAffine(
+            img_moving,
+            tform,
+            img_fixed.shape[::-1],
+            flags=cv2.INTER_LINEAR + cv2.WARP_INVERSE_MAP)
+
+    return tform, img_moving_warped
+
+
 def sitk2numpyarray(array_sitk):
     ''' Convert sitk array to numpy array. '''
 
@@ -70,7 +142,7 @@ def imshow3d(img3d, display_row_num, display_col_num):
         plt.imshow(img3d[i, :, :])
 
 
-def read_tiff_3d(filename):
+def read_tiff_3d(filename, swap_rows_cols=True):
     '''Read 3d tiff files. '''
 
     img = sitk.ReadImage(filename.encode('utf-8'))
@@ -86,12 +158,14 @@ def read_tiff_3d(filename):
         img3d = sitk2numpyarray(tmp)  # convert sitk array to numpy array
     else:
         col, row = img.GetSize()
-        dep = 1
         tmp = sitk.GetArrayFromImage(img)
         img2d = sitk2numpyarray(tmp)  # convert sitk array to numpy array
         img3d = np.expand_dims(img2d, axis=0)
 
-    return img3d, col, row, dep
+    if swap_rows_cols:
+        img3d = np.moveaxis(img3d, 1, 2)
+
+    return img3d
 
 
 def relabel(maskimg_3d):
@@ -132,16 +206,6 @@ class PairwiseMatching(ArgSchemaParser):
     '''
 
     def run(self):
-        self.dir_output = self.args['output_directory']
-        self.segmask_fixed_3d = np.array([])
-        self.segmask_moving_3d = np.array([])
-        self.segmask_moving_3d_registered = np.array([])
-        self.matching_table = np.array([])
-        self.segmask_fixed_3d_sz = 0
-        self.segmask_moving_3d_sz = 0
-        return self.match_pairs()
-
-    def match_pairs(self):
         ''' Pairwise matching of ophys-ophys sessions. '''
 
         filename_output_fixed_matched_img = ''
@@ -150,69 +214,36 @@ class PairwiseMatching(ArgSchemaParser):
         pre_fixed = re.findall(
                 self.args['id_pattern'],
                 self.args['filename_intensity_fixed'])[0]
-        pre_movin = re.findall(
+        pre_moving = re.findall(
                 self.args['id_pattern'],
                 self.args['filename_intensity_moving'])[0]
 
-        filename_matching_table = pre_fixed + '_to_' + pre_movin
+        filename_matching_table = pre_fixed + '_to_' + pre_moving
 
         # register the average intensity images
-        tform = self.register_intensity_images()
-                #self.args,
-                #self.args['filename_intensity_fixed'],
-                #self.args['filename_intensity_moving'])
+        tform, moving_warped = register_intensity_images(
+                self.args['filename_intensity_fixed'],
+                self.args['filename_intensity_moving'],
+                self.args['registration_iterations'],
+                self.args['registration_precision'])
 
-        # read segmentation masks
-        (
-                self.segmask_fixed_3d,
-                col_segmask_fixed_3d,
-                row_segmask_fixed_3d,
-                dep_segmask_fixed_3d) = read_tiff_3d(
-                        self.args['filename_segmask_fixed'])
-        (
-                self.segmask_moving_3d,
-                col_segmask_moving_3d,
-                row_segmask_moving_3d,
-                dep_segmask_moving_3d) = read_tiff_3d(
-                        self.args['filename_segmask_moving'])
+        if self.args['save_registered_image'] == 1:
+            filename = os.path.join(
+                self.args['output_directory'],
+                'register_%s_to_%s.tif' % (pre_fixed, pre_moving)
+                ).encode('utf-8')
+            sitk_img_moving_registered = sitk.GetImageFromArray(
+                moving_warped.astype(np.uint8))
+            sitk.WriteImage(sitk_img_moving_registered, filename)
 
-        # switch row and col of segmasks
-        segmask_fixed_3d_tmp = np.zeros(
-            (dep_segmask_fixed_3d,
-             row_segmask_fixed_3d,
-             col_segmask_fixed_3d),
-            dtype=np.int)
-
-        for i in range(dep_segmask_fixed_3d):
-            segmask_fixed_3d_tmp[i, :, :] = \
-                np.transpose(self.segmask_fixed_3d[i, :, :])
-        self.segmask_fixed_3d = np.copy(segmask_fixed_3d_tmp)
-
-        segmask_moving_3d_tmp = np.zeros((
-            dep_segmask_moving_3d,
-            row_segmask_moving_3d,
-            col_segmask_moving_3d))
-        for i in range(dep_segmask_moving_3d):
-            segmask_moving_3d_tmp[i, :, :] = np.transpose(
-                    self.segmask_moving_3d[i, :, :])
-        self.segmask_moving_3d = np.copy(segmask_moving_3d_tmp)
-
-        self.segmask_fixed_3d_sz = [
-            dep_segmask_fixed_3d,
-            row_segmask_fixed_3d,
-            col_segmask_fixed_3d]
-        self.segmask_moving_3d_sz = [
-            dep_segmask_moving_3d,
-            row_segmask_moving_3d,
-            col_segmask_moving_3d]
-
-        # relabeling segmentation masks because they are unit
-        # 8 data type and only code 255 regions
-        self.segmask_fixed_3d = relabel(self.segmask_fixed_3d)
-        self.segmask_moving_3d = relabel(self.segmask_moving_3d)
+        # relabel the masks and write to disk
+        self.segmask_fixed_3d = relabel(
+                read_tiff_3d(self.args['filename_segmask_fixed']))
+        self.segmask_moving_3d = relabel(
+                read_tiff_3d(self.args['filename_segmask_moving']))
 
         filename_segmask_fixed_relabel = os.path.join(
-            self.dir_output,
+            self.args['output_directory'],
             pre_fixed +
             '_maxInt_masks_relabel.tif').encode('utf-8')
 
@@ -221,27 +252,20 @@ class PairwiseMatching(ArgSchemaParser):
         sitk.WriteImage(sitk_segmask_fixed, filename_segmask_fixed_relabel)
 
         filename_segmask_moving_relabel = os.path.join(
-            self.dir_output,
-            pre_movin +
+            self.args['output_directory'],
+            pre_moving +
             '_maxInt_masks_relabel.tif').encode('utf-8')
 
         sitk_segmask_moving = sitk.GetImageFromArray(
             self.segmask_moving_3d.astype(np.uint16))
         sitk.WriteImage(sitk_segmask_moving, filename_segmask_moving_relabel)
 
-        if self.args['diagnostic_figures'] == 1:
-            imshow3d(self.segmask_fixed_3d, 1, self.segmask_fixed_3d_sz[0])
-            imshow3d(self.segmask_moving_3d, 1, self.segmask_moving_3d_sz[0])
-
         # transform moving segmentation masks
         # compute self.segmask_moving_3d_registered
-        self.register_mask_images(tform)
-
-        if self.args['diagnostic_figures'] == 1:
-            imshow3d(
-                    self.segmask_moving_3d_registered,
-                    1,
-                    self.segmask_moving_3d_sz[0])
+        self.segmask_moving_3d_registered = transform_masks(
+                self.segmask_moving_3d,
+                self.segmask_fixed_3d.shape[1:],
+                tform)
 
         # matching cells
         tmp_filenames = dict()
@@ -271,152 +295,6 @@ class PairwiseMatching(ArgSchemaParser):
         matching_pairs['transform'] = np.round(tform, 6).tolist()
 
         return matching_pairs
-
-    def register_intensity_images(self):
-            #self, filename_int_fixed, filename_int_moving):
-        ''' Register the average intensity images of the two ophys
-            sessions using affine transformation'''
-
-        # read average intensity images
-        img_fixed = np.array(im.open(self.args['filename_intensity_fixed']))
-        img_moving = np.array(im.open(self.args['filename_intensity_moving']))
-
-        # Find size of img_fixed
-        sz_fixed = np.shape(img_fixed)
-
-        # Define the motion model
-        warp_mode = cv2.MOTION_AFFINE
-
-        # Define 2x3 or 3x3 matrices and initialize the matrix to identity
-        if warp_mode == cv2.MOTION_HOMOGRAPHY:
-            tform = np.eye(3, 3, dtype=np.float32)
-        else:
-            tform = np.eye(2, 3, dtype=np.float32)
-
-        # Define termination criteria
-        criteria = (
-                cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT,
-                self.args['registration_iterations'],
-                self.args['registration_precision'])
-
-        # Run the ECC algorithm. The results are stored in warp_matrix.
-        (ccval, tform) = cv2.findTransformECC(
-                img_fixed,
-                img_moving,
-                tform,
-                warp_mode,
-                criteria)
-        # for opencv 4.0:
-        # inputMask=None,
-        # gaussFiltSize=5)
-
-        if warp_mode == cv2.MOTION_HOMOGRAPHY:
-            # Use warpPerspective for Homography
-            img_moving_registered = cv2.warpPerspective(
-                img_moving,
-                tform,
-                (sz_fixed[1],
-                 sz_fixed[0]),
-                flags=cv2.INTER_LINEAR +
-                cv2.WARP_INVERSE_MAP)
-        else:
-            # Use warpAffine for Translation, Euclidean and Affine
-            img_moving_registered = cv2.warpAffine(
-                img_moving,
-                tform,
-                (sz_fixed[1],
-                 sz_fixed[0]),
-                flags=cv2.INTER_LINEAR +
-                cv2.WARP_INVERSE_MAP)
-
-        if self.args['diagnostic_figures'] == 1:
-
-            sz0, sz1 = np.shape(img_fixed)
-            img_overlay_ori = np.zeros((sz0, sz1, 3), np.uint8)
-            img_overlay = np.zeros((sz0, sz1, 3), np.uint8)
-
-            img_overlay_ori[:, :, 0] = img_fixed
-            img_overlay_ori[:, :, 1] = img_moving
-
-            img_overlay[:, :, 0] = img_fixed
-            img_overlay[:, :, 1] = img_moving_registered
-
-            figs = plt.figure()
-            figs.add_subplot(231)
-            plt.imshow(img_fixed, cmap='gray')
-            figs.add_subplot(232)
-            plt.imshow(img_moving, cmap='gray')
-            figs.add_subplot(233)
-            plt.imshow(img_moving_registered, cmap='gray')
-            figs.add_subplot(234)
-            plt.imshow(img_overlay_ori)
-            figs.add_subplot(235)
-            plt.imshow(img_overlay)
-
-        if self.args['save_registered_image'] == 1:
-
-            filename_prefix_moving = re.findall(
-                    self.args['id_pattern'],
-                    self.args['filename_intensity_moving'])[0]
-            filename_prefix_fixed = re.findall(
-                    self.args['id_pattern'],
-                    self.args['filename_intensity_fixed'])[0]
-
-            filename = os.path.join(
-                self.dir_output,
-                'register_' + filename_prefix_moving +
-                '_to_' + filename_prefix_fixed + '.tif').encode('utf-8')
-            sitk_img_moving_registered = sitk.GetImageFromArray(
-                img_moving_registered.astype(np.uint8))
-            sitk.WriteImage(sitk_img_moving_registered, filename)
-
-        return tform
-
-    def register_mask_images(self, tform):
-        ''' Transform segmentation masks using the affine
-            transformation defined by tform'''
-
-        row_segmask_fixed_3d = self.segmask_fixed_3d_sz[1]
-        col_segmask_fixed_3d = self.segmask_fixed_3d_sz[2]
-        num_images_moving = self.segmask_moving_3d_sz[0]
-
-        self.segmask_moving_3d_registered = np.zeros((
-            num_images_moving,
-            row_segmask_fixed_3d,
-            col_segmask_fixed_3d),
-            dtype=np.int)
-
-        # number of frames in segmask_moving_3d
-        for k in range(num_images_moving):
-
-            num = np.int(np.amax(self.segmask_moving_3d[k, :, :]))
-            segmask_2d_registered = np.zeros(
-                (row_segmask_fixed_3d, col_segmask_fixed_3d))
-
-            for i in range(1, num + 1):  # number of cells in the current frame
-                # tmp = np.zeros((row_segmask_fixed_3d, col_segmask_fixed_3d))
-                tmp = np.zeros((
-                        self.segmask_moving_3d_sz[1],
-                        self.segmask_moving_3d_sz[2]))
-                tmp[self.segmask_moving_3d[k, :, :] == i] = i
-
-                if np.count_nonzero(tmp) > 0:  # this label exists
-
-                    tmp_registered = cv2.warpAffine(
-                        tmp,
-                        tform,
-                        (col_segmask_fixed_3d,
-                         row_segmask_fixed_3d),
-                        flags=cv2.INTER_LINEAR +
-                        cv2.WARP_INVERSE_MAP)
-
-                    segmask_2d_registered[tmp_registered > 0] = i
-
-            self.segmask_moving_3d_registered[k, :, :] = segmask_2d_registered
-
-        np.amax(self.segmask_moving_3d_registered)
-
-        return self.segmask_moving_3d_registered
 
     def compute_features(self, filename_weightmatrix):
         ''' Computer features and weight matrix needed for
@@ -448,11 +326,11 @@ class PairwiseMatching(ArgSchemaParser):
         [
                 fixed_fea['num_img'],
                 fixed_fea['row_segmask'],
-                fixed_fea['col_segmask']] = self.segmask_fixed_3d_sz
+                fixed_fea['col_segmask']] = self.segmask_fixed_3d.shape
         [
                 moving_fea['num_img'],
                 moving_fea['row_segmask'],
-                moving_fea['col_segmask']] = self.segmask_moving_3d_sz
+                moving_fea['col_segmask']] = self.segmask_moving_3d.shape
 
         # compute features of bipartite graph edges
         edge_fea = dict()
@@ -529,9 +407,9 @@ class PairwiseMatching(ArgSchemaParser):
                 (len(para['filename_moving']) > 0)):
 
             para['filename_fixed'] = os.path.join(
-                self.dir_output, self.args['filename_fixed'])
+                self.args['output_directory'], self.args['filename_fixed'])
             para['filename_moving'] = os.path.join(
-                self.dir_output, self.args['filename_moving'])
+                self.args['output_directory'], self.args['filename_moving'])
 
             segmask_moving_3d_matching = np.zeros(
                     self.segmask_moving_3d_registered.shape)
@@ -567,10 +445,10 @@ class PairwiseMatching(ArgSchemaParser):
         if self.args['munkres_executable']:
             # C++
             tool_name_args = [self.args['munkres_executable'] + " " +
-                      para_matching['filename_weightmatrix'] + " " +
-                      str(para_matching['fixed_cellnum']) + " " +
-                      str(para_matching['moving_cellnum']) + " " +
-                      para_matching['filename_tmpmatching']]
+                              para_matching['filename_weightmatrix'] + " " +
+                              str(para_matching['fixed_cellnum']) + " " +
+                              str(para_matching['moving_cellnum']) + " " +
+                              para_matching['filename_tmpmatching']]
 
             run_bipartite_matching(tool_name_args)
 
@@ -673,13 +551,13 @@ class PairwiseMatching(ArgSchemaParser):
 
         # compute features
         filename_weightmatrix = os.path.join(
-            self.dir_output, 'weightmatrix.txt')
+            self.args['output_directory'], 'weightmatrix.txt')
         fixed_fea, moving_fea, edge_fea = \
             self.compute_features(filename_weightmatrix)
 
         # Generate matching result by calling bipartite graph matching in c++
         filename_tmpmatching = os.path.join(
-            self.dir_output, 'matching_result_temporary.txt')
+            self.args['output_directory'], 'matching_result_temporary.txt')
 
         para_matching = dict()
 
@@ -704,7 +582,7 @@ class PairwiseMatching(ArgSchemaParser):
         # write matching table
         if len(tmp_filenames['matching_table']) > 0:
             filename_matching_table = os.path.join(
-                self.dir_output, tmp_filenames['matching_table'])
+                self.args['output_directory'], tmp_filenames['matching_table'])
             np.savetxt(
                 filename_matching_table,
                 self.matching_table,
@@ -722,6 +600,7 @@ class PairwiseMatching(ArgSchemaParser):
                 matching_ratio_fixed,
                 matching_ratio_moving,
                 edge_fea['weight_matrix'])
+
 
 if __name__ == "__main__":
     pmod = PairwiseMatching()
