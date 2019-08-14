@@ -40,10 +40,7 @@ def transform_masks(moving, dst_shape, tform):
                 dst_shape[1]),
             dtype=np.int)
 
-    print(transformed_3d.shape, moving.shape)
-
     for k, frame in enumerate(moving):
-        print(k, frame.shape)
         labels = np.unique(frame)
         transformed_2d = np.zeros(dst_shape)
 
@@ -64,7 +61,7 @@ def transform_masks(moving, dst_shape, tform):
 
 
 def register_intensity_images(
-        img_path_fixed, img_path_moving, maxCount, epsilon, warpimage=True):
+        img_path_fixed, img_path_moving, maxCount, epsilon):
     ''' Register the average intensity images of the two ophys
         sessions using affine transformation'''
 
@@ -101,26 +98,6 @@ def register_intensity_images(
     return tform, img_moving_warped
 
 
-def sitk2numpyarray(array_sitk):
-    ''' Convert sitk array to numpy array. '''
-
-    dim = np.shape(array_sitk)
-
-    if len(dim) == 3:
-        dep, col, row = np.shape(array_sitk)
-        array_np = np.zeros((dep, row, col), dtype=np.int)
-        for i in range(dep):
-            array_np[i, :, :] = array_sitk[i, :, :].T
-    elif len(dim) == 2:
-        array_np = array_sitk.T
-    else:
-        logger.error("Error in converting sitk array to numpy array. "
-                     "Image should be either 2D or 3D.")
-        return
-
-    return array_np
-
-
 def imshow3d(img3d, display_row_num, display_col_num):
     '''Display 3d images.'''
 
@@ -142,28 +119,19 @@ def imshow3d(img3d, display_row_num, display_col_num):
         plt.imshow(img3d[i, :, :])
 
 
-def read_tiff_3d(filename, swap_rows_cols=True):
+def read_tiff_3d(filename):
     '''Read 3d tiff files. '''
 
     img = sitk.ReadImage(filename.encode('utf-8'))
     dim = img.GetDimension()
 
-    if (dim != 2) and (dim != 3):
-        logger.error("Error in reading 3D tiff. Image "
-                     "dimension must be 2 or 3! ")
+    if dim not in [2, 3]:
+        raise ValueError("Error in read_tiff_3d() Image "
+                         "dimension must be 2 or 3.")
 
-    if dim == 3:
-        col, row, dep = img.GetSize()
-        tmp = sitk.GetArrayFromImage(img)
-        img3d = sitk2numpyarray(tmp)  # convert sitk array to numpy array
-    else:
-        col, row = img.GetSize()
-        tmp = sitk.GetArrayFromImage(img)
-        img2d = sitk2numpyarray(tmp)  # convert sitk array to numpy array
-        img3d = np.expand_dims(img2d, axis=0)
-
-    if swap_rows_cols:
-        img3d = np.moveaxis(img3d, 1, 2)
+    img3d = sitk.GetArrayFromImage(img).astype('int')
+    if dim == 2:
+        img3d = np.expand_dims(img3d, axis=0)
 
     return img3d
 
@@ -218,7 +186,7 @@ class PairwiseMatching(ArgSchemaParser):
                 self.args['id_pattern'],
                 self.args['filename_intensity_moving'])[0]
 
-        filename_matching_table = pre_fixed + '_to_' + pre_moving
+        filename_matching_table = pre_moving + '_to_' + pre_fixed
 
         # register the average intensity images
         tform, moving_warped = register_intensity_images(
@@ -230,7 +198,7 @@ class PairwiseMatching(ArgSchemaParser):
         if self.args['save_registered_image'] == 1:
             filename = os.path.join(
                 self.args['output_directory'],
-                'register_%s_to_%s.tif' % (pre_fixed, pre_moving)
+                'register_%s_to_%s.tif' % (pre_moving, pre_fixed)
                 ).encode('utf-8')
             sitk_img_moving_registered = sitk.GetImageFromArray(
                 moving_warped.astype(np.uint8))
