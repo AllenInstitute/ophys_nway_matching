@@ -17,7 +17,6 @@ import SimpleITK as sitk
 import os
 import re
 from nway.pairwise_matching import PairwiseMatching, read_tiff_3d
-import nway.region_properties as rp
 from nway.schemas import NwayMatchingSchema
 from argschema import ArgSchemaParser
 
@@ -195,8 +194,7 @@ class NwayMatching(ArgSchemaParser):
 
             dict_label_to_roiid[labelvalue[idx]] = cell_rois[i]["id"]
 
-        segmaskimg2 = rp.RegionProperties(segmaskimg)
-        labels_val, mask_cellnum = segmaskimg2.get_labels()
+        mask_cellnum = segmaskimg.max()
 
         return dict_label_to_roiid, mask_cellnum
 

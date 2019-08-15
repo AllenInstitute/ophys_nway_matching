@@ -20,13 +20,61 @@ import scipy.spatial
 import scipy.optimize
 from argschema import ArgSchemaParser
 
-import nway.region_properties as rp
 from nway.schemas import PairwiseMatchingSchema
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
 plt.ion()
+
+
+def region_properties(mask):
+    if len(mask.shape) not in [2, 3]:
+        raise ValueError("region_properties needs a 2D or 3D image")
+
+    prop = {}
+    prop['labels'] = np.arange(mask.max()) + 1
+    n = len(prop['labels'])
+    prop['centers'] = np.zeros((n, 2))
+    prop['pixels'] = [[]] * n
+    for i, label in enumerate(prop['labels']):
+        label_locs = np.argwhere(mask == label)
+        if len(label_locs) > 0:
+            # the rounding int cast here should not be here
+            # leaving it in place for now to preserve legacy
+            # matching
+            prop['centers'][i] = np.round(
+                    label_locs.mean(axis=0)).astype('int')[[-1, -2]]
+        prop['pixels'][i] = set([tuple(x) for x in label_locs])
+    return prop
+
+
+def calculate_cost_matrix(mask1, mask2, maximum_distance):
+    ''' Computer features and weight matrix needed for
+        bipartite graph matching.'''
+
+    prop1 = region_properties(mask1)
+    prop2 = region_properties(mask2)
+
+    # compute features of bipartite graph edges
+    overlap = np.zeros((
+            prop1['labels'].size,
+            prop2['labels'].size))
+
+    # compute pair-wise distances between cell centers
+    distance = scipy.spatial.distance.cdist(
+            prop1['centers'], prop2['centers'], 'euclidean')
+
+    for i, ipix in enumerate(prop1['pixels']):
+        for j, jpix in enumerate(prop2['pixels']):
+            overlap[i, j] = \
+                    len(ipix.intersection(jpix)) / len(ipix.union(jpix))
+
+    dist2 = distance / maximum_distance
+    dist2[dist2 > 1] = 999.0
+    cost_matrix = dist2 + (1.0 - overlap)
+
+    return prop1, prop2, distance, overlap, cost_matrix
 
 
 def transform_masks(moving, dst_shape, tform):
@@ -202,6 +250,8 @@ class PairwiseMatching(ArgSchemaParser):
                 ).encode('utf-8')
             sitk_img_moving_registered = sitk.GetImageFromArray(
                 moving_warped.astype(np.uint8))
+            print(filename)
+            print(sitk_img_moving_registered.GetSize())
             sitk.WriteImage(sitk_img_moving_registered, filename)
 
         # relabel the masks and write to disk
@@ -263,108 +313,6 @@ class PairwiseMatching(ArgSchemaParser):
         matching_pairs['transform'] = np.round(tform, 6).tolist()
 
         return matching_pairs
-
-    def compute_features(self, filename_weightmatrix):
-        ''' Computer features and weight matrix needed for
-            bipartite graph matching.'''
-
-        # compute features of fixed and moving images
-        fixed_img = rp.RegionProperties(self.segmask_fixed_3d)
-        moving_img = rp.RegionProperties(self.segmask_moving_3d_registered)
-
-        fixed_fea = dict()
-        moving_fea = dict()
-
-        fixed_fea['areas'] = fixed_img.get_areas()
-        moving_fea['areas'] = moving_img.get_areas()
-
-        fixed_fea['labels'], fixed_fea['cellnum'] = fixed_img.get_labels()
-        moving_fea['labels'], moving_fea['cellnum'] = moving_img.get_labels()
-
-        fixed_fea['centers'] = fixed_img.get_centers()
-        moving_fea['centers'] = moving_img.get_centers()
-
-        # take only x,y value
-        fixed_fea['centers'] = fixed_fea['centers'][:, 1:3]
-        # take only x,y value
-        moving_fea['centers'] = moving_fea['centers'][:, 1:3]
-
-        pixelidxlist_fixed = fixed_img.get_pixel_idx_list()     # dictionary
-
-        [
-                fixed_fea['num_img'],
-                fixed_fea['row_segmask'],
-                fixed_fea['col_segmask']] = self.segmask_fixed_3d.shape
-        [
-                moving_fea['num_img'],
-                moving_fea['row_segmask'],
-                moving_fea['col_segmask']] = self.segmask_moving_3d.shape
-
-        # compute features of bipartite graph edges
-        edge_fea = dict()
-        edge_fea['overlap'] = np.zeros(
-                (fixed_fea['cellnum'], moving_fea['cellnum']))
-
-        # compute pair-wise distances between cell centers
-        edge_fea['dist'] = scipy.spatial.distance.cdist(
-                fixed_fea['centers'], moving_fea['centers'], 'euclidean')
-
-        for i in range(0, fixed_fea['cellnum']):
-            segmask_fixed_this_layer = self.segmask_fixed_3d[
-                    pixelidxlist_fixed[fixed_fea['labels'][i]][0, 0], :, :]
-            cellmask_fixed = (segmask_fixed_this_layer == i + 1)
-
-            # compute overlap between cell centers
-            for j in range(0, moving_fea['num_img']):
-
-                segmask_moving_this_layer = \
-                    self.segmask_moving_3d_registered[j, :, :]
-
-                # exclude background with label 0
-                labels_moving_this_layer = np.unique(
-                    segmask_moving_this_layer[cellmask_fixed > 0]) - [0]
-                labels_moving_this_layer_num = len(labels_moving_this_layer)
-
-                # Compute for each overlapping cell in moving image
-                for k in range(0, labels_moving_this_layer_num):
-
-                    cellmask_moving = (
-                            segmask_moving_this_layer ==
-                            labels_moving_this_layer[k])
-
-                    mask_intersection = np.multiply(
-                            cellmask_moving, cellmask_fixed)
-                    mask_union = np.add(cellmask_moving, cellmask_fixed)
-                    area_intersection = np.count_nonzero(mask_intersection)
-                    area_union = np.count_nonzero(mask_union)
-                    edge_fea['overlap'][i, labels_moving_this_layer[k] - 1] = \
-                        area_intersection / area_union
-
-        dist2 = np.copy(edge_fea['dist'])
-        dist2 = dist2 / self.args['maximum_distance']
-        dist2[dist2 > 1] = 999.0
-        # overlap2 = \
-        #        1 - \
-        #        edge_fea['overlap'].astype(float) / \
-        #        np.amax(edge_fea['overlap'])
-        overlap2 = 1 - edge_fea['overlap'].astype(float)
-        edge_fea['weight_matrix'] = dist2 + overlap2
-
-        if self.args['diagnostic_figures'] == 1:
-            figs = plt.figure()
-            figs.add_subplot(221)
-            plt.imshow(dist2, cmap='gray')
-            figs.add_subplot(222)
-            plt.imshow(overlap2, cmap='gray')
-            figs.add_subplot(223)
-            plt.imshow(edge_fea['weight_matrix'], cmap='gray')
-
-        np.savetxt(
-            filename_weightmatrix,
-            edge_fea['weight_matrix'],
-            delimiter=' ')
-
-        return fixed_fea, moving_fea, edge_fea
 
     def write_matching_images(self, para):
         ''' Write matching results into images. The same
@@ -520,8 +468,16 @@ class PairwiseMatching(ArgSchemaParser):
         # compute features
         filename_weightmatrix = os.path.join(
             self.args['output_directory'], 'weightmatrix.txt')
-        fixed_fea, moving_fea, edge_fea = \
-            self.compute_features(filename_weightmatrix)
+        fixed_fea, moving_fea, distance, overlap, cost_matrix = \
+            calculate_cost_matrix(
+                    self.segmask_fixed_3d,
+                    self.segmask_moving_3d_registered,
+                    self.args['maximum_distance'])
+
+        np.savetxt(
+            filename_weightmatrix,
+            cost_matrix,
+            delimiter=' ')
 
         # Generate matching result by calling bipartite graph matching in c++
         filename_tmpmatching = os.path.join(
@@ -531,9 +487,12 @@ class PairwiseMatching(ArgSchemaParser):
 
         para_matching['filename_weightmatrix'] = filename_weightmatrix
         para_matching['filename_tmpmatching'] = filename_tmpmatching
-        para_matching['fixed_cellnum'] = fixed_fea['cellnum']
-        para_matching['moving_cellnum'] = moving_fea['cellnum']
-        para_matching['edge_fea'] = edge_fea
+        para_matching['fixed_cellnum'] = fixed_fea['labels'].size
+        para_matching['moving_cellnum'] = moving_fea['labels'].size
+        para_matching['edge_fea'] = {
+                'dist': distance,
+                'overlap': overlap,
+                'weight_matrix': cost_matrix}
 
         num_matched = self.gen_matching_table(para_matching)
 
@@ -557,8 +516,9 @@ class PairwiseMatching(ArgSchemaParser):
                 delimiter=' ',
                 fmt="%d %d %7.4e %7.4e %7.4e")
 
-        matching_ratio_fixed = np.float(num_matched) / fixed_fea['cellnum']
-        matching_ratio_moving = np.float(num_matched) / moving_fea['cellnum']
+        matching_ratio_fixed = np.float(num_matched) / fixed_fea['labels'].size
+        matching_ratio_moving = \
+            np.float(num_matched) / moving_fea['labels'].size
 
         # remove temporary files
         remove_tmp_files(filename_weightmatrix)
@@ -567,7 +527,7 @@ class PairwiseMatching(ArgSchemaParser):
         return (
                 matching_ratio_fixed,
                 matching_ratio_moving,
-                edge_fea['weight_matrix'])
+                cost_matrix)
 
 
 if __name__ == "__main__":
