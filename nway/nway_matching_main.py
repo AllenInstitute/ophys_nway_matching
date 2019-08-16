@@ -174,28 +174,13 @@ class NwayMatching(ArgSchemaParser):
 
         for i in range(self.expnum - 1):
             for j in range(i + 1, self.expnum):
-
-                linenum = np.shape(self.matching_res_dict[cnt]['res'])[0]
-
-                for k in range(linenum):
-                    # scan each line in self.matching_res_dict[cnt]['res']
-                    # only consider lines that have cells matching to each
-                    # other in session i and j
-                    if (
-                           (self.matching_res_dict[cnt]['res'][k, 0] != -1) and
-                           (self.matching_res_dict[cnt]['res'][k, 1] != -1)):
-                        # initiate every element to be -1,
-                        # e.g., [-1, -1, -1, -1, -1]
-                        this_record = np.zeros(self.expnum) - 1
-                        this_record[i] = \
-                            self.matching_res_dict[cnt]['res'][k, 0]
-                        this_record[j] = \
-                            self.matching_res_dict[cnt]['res'][k, 1]
-
-                        # add the current line into nway table
-                        matching_table_nway.append(this_record.astype(int))
-
-                cnt = cnt + 1
+                for line in self.matching_res_dict[cnt]['res']:
+                    if (line[0] != -1) & (line[1] != -1):
+                        this_record = np.zeros(self.expnum, dtype='int') - 1
+                        this_record[i] = line[0]
+                        this_record[j] = line[1]
+                        matching_table_nway.append(this_record)
+                cnt += 1
 
         return matching_table_nway
 
@@ -450,9 +435,7 @@ class NwayMatching(ArgSchemaParser):
         # pair-wise matching
         self.matching_res_dict = []
         self.pair_matches = []
-
         for i in range(self.expnum - 1):
-
             pair_args = dict(self.args)
             pair_args['filename_intensity_fixed'] = self.filename_intensity[i]
             pair_args['filename_segmask_fixed'] = self.filename_segmask[i]
@@ -473,7 +456,6 @@ class NwayMatching(ArgSchemaParser):
         # generate label id to roi id dictionary
         self.dict_label_to_roiid = []
         self.mask_cellnum = np.zeros(self.expnum, dtype=np.int)
-
         for i in range(self.expnum):
             this_dict_label_to_roiid, self.mask_cellnum[i] = \
                     self.gen_label_roi_dict(
@@ -482,12 +464,7 @@ class NwayMatching(ArgSchemaParser):
                     self.dict_label_to_roiid, this_dict_label_to_roiid)
 
         # generate N-way matching table
-        logger.info('Generating Nway matching table with redundancy ...')
         matching_table_nway_tmp = self.gen_nway_table_with_redundancy()
-        logger.info('Pass.')
-
-        logger.info('Removing redunant inforamtion '
-                    'from Nway matching table...')
 
         matching_table_nway_tmp = self.remove_nway_table_redundancy(
                 matching_table_nway_tmp)
