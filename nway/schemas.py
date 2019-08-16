@@ -11,6 +11,11 @@ class NwayMatchingSchema(ArgSchema):
         required=False,
         default=True,
         description='Whether to save registered image.')
+    save_pairwise_tables = Boolean(
+        required=False,
+        default=False,
+        description=("Whether to save matching tables from "
+                     "pairwise matching"))
     maximum_distance = Int(
         required=False,
         default=10,

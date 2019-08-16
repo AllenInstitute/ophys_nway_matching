@@ -41,7 +41,7 @@ class NwayMatching(ArgSchemaParser):
         json_data = open(input_json).read()
         data = json.loads(json_data)
 
-        self.dir_output = str(data['output_directory'])
+        self.args['output_directory'] = str(data['output_directory'])
         self.expnum = len(data['experiment_containers']['ophys_experiments'])
 
         self.filename_intensity = ["" for x in range(self.expnum)]
@@ -88,7 +88,7 @@ class NwayMatching(ArgSchemaParser):
         json_data = open(input_json).read()
         data = json.loads(json_data)
 
-        self.dir_output = str(data['output_directory'])
+        self.args['output_directory'] = str(data['output_directory'])
         self.expnum = len(data['experiment_containers']['ophys_experiments'])
 
         self.filename_intensity = ["" for x in range(self.expnum)]
@@ -120,43 +120,24 @@ class NwayMatching(ArgSchemaParser):
            Labels are coded in segmented cell mask images.
         '''
 
-        data = json.loads(open(input_json).read())
+        with open(input_json, 'r') as f:
+            data = json.load(f)
+
         filename_segmask = os.path.join(
-                self.dir_output,
+                self.args['output_directory'],
                 filename_exp_prefix_fixed + '_maxInt_masks_relabel.tif')
         expnum = len(data['experiment_containers']['ophys_experiments'])
 
-        for i in range(expnum):
-
-            this_exp = data['experiment_containers']['ophys_experiments'][i]
-            filename_max_int_mask_image = str(this_exp['max_int_mask_image'])
-            ind = filename_max_int_mask_image.find(filename_exp_prefix_fixed)
-
-            if ind != -1:
+        for this_exp in data['experiment_containers']['ophys_experiments']:
+            if filename_exp_prefix_fixed in this_exp['max_int_mask_image']:
                 cell_rois = this_exp['cell_rois']
                 break
 
-        img = sitk.ReadImage(filename_segmask)
-        dim = img.GetDimension()
+        segmaskimg = read_tiff_3d(filename_segmask)
+        segmaskimg = np.moveaxis(segmaskimg, 1, 2)
 
-        if (dim != 2) and (dim != 3):
-            raise RuntimeError(
-                    "Image dimension must be 2 or 3! Check input json.")
-
-        if dim == 3:
-            col, row, dep = img.GetSize()
-            tmp = sitk.GetArrayFromImage(img)
-        else:
-            col, row = img.GetSize()
-            dep = 1
-            tmp = sitk.GetArrayFromImage(img)
-            tmp = np.expand_dims(tmp, axis=0)
-
-#        convert sitk array to numpy array
-        segmaskimg = np.zeros((dep, col, row), dtype=np.int)
-
-        for i in range(dep):
-            segmaskimg[i, :, :] = tmp[i, :, :].T
+        #for i in range(segmasking.shape[0]):
+        #    segmaskimg[i, :, :] = tmp[i, :, :].T
 
         cellnum = len(cell_rois)
         dict_label_to_roiid = dict()
@@ -405,7 +386,7 @@ class NwayMatching(ArgSchemaParser):
             Each row is one matching. It has N+1 entries. -1 means no match.
             The last entry is the unified label of the cells.'''
         filename_matching_table = os.path.join(
-            self.dir_output, 'matching_result.txt')
+            self.args['output_directory'], 'matching_result.txt')
         np.savetxt(
                 filename_matching_table,
                 self.matching_table_nway,
@@ -459,10 +440,10 @@ class NwayMatching(ArgSchemaParser):
 
         for k in range(self.expnum):
             outimgfilename = os.path.join(
-                self.dir_output,
+                self.args['output_directory'],
                 self.filename_exp_prefix[k] + '_matching.tif')
             filename_segmask_relabel = os.path.join(
-                self.dir_output,
+                self.args['output_directory'],
                 self.filename_exp_prefix[k] + '_maxInt_masks_relabel.tif')
             segmask_3d = \
                 read_tiff_3d(filename_segmask_relabel)
@@ -485,31 +466,24 @@ class NwayMatching(ArgSchemaParser):
 
         # pair-wise matching
         self.matching_res_dict = []
+        self.pair_matches = []
 
         for i in range(self.expnum - 1):
 
-            para_matching = dict(self.args)
-            para_matching['filename_intensity_fixed'] = \
-                self.filename_intensity[i]
-            para_matching['filename_segmask_fixed'] = self.filename_segmask[i]
-
-            para_matching['filename_exp_prefix_fixed'] = re.findall(
-                self.args['id_pattern'], self.filename_intensity[i])[0]
-            para_matching['output_directory'] = self.dir_output
+            pair_args = dict(self.args)
+            pair_args['filename_intensity_fixed'] = self.filename_intensity[i]
+            pair_args['filename_segmask_fixed'] = self.filename_segmask[i]
+            pair_args['output_directory'] = self.args['output_directory']
 
             for j in range(i + 1, self.expnum):
-
-                para_matching['filename_intensity_moving'] = \
+                pair_args['filename_intensity_moving'] = \
                     self.filename_intensity[j]
-                para_matching['filename_segmask_moving'] = \
+                pair_args['filename_segmask_moving'] = \
                     self.filename_segmask[j]
 
-                logger.info(
-                        'Matching %s against %s ...' % (
-                            para_matching['filename_intensity_moving'],
-                            para_matching['filename_intensity_fixed']))
-                matching = PairwiseMatching(input_data=para_matching, args=[])
-                matching_pair = matching.run()
+                self.pair_matches.append(
+                        PairwiseMatching(input_data=pair_args, args=[]))
+                matching_pair = self.pair_matches[-1].run()
 
                 self.matching_res_dict.append(matching_pair)
 
@@ -532,7 +506,6 @@ class NwayMatching(ArgSchemaParser):
         logger.info('Removing redunant inforamtion '
                     'from Nway matching table...')
 
-        print(matching_table_nway_tmp)
         matching_table_nway_tmp = self.remove_nway_table_redundancy(
                 matching_table_nway_tmp)
         logger.info('Pass.')
@@ -557,7 +530,7 @@ class NwayMatching(ArgSchemaParser):
             3) Combining pairwise matching to generate Nway result.
         '''
 
-        self.dir_output = ""
+        #self.args['output_directory'] = ""
         self.filename_intensity = []
         self.filename_segmask = []
         self.filename_exp_prefix = []

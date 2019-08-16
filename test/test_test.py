@@ -47,6 +47,7 @@ def test_against_old_results(input_file, exe):
     args['output_json'] = os.path.join(
             os.path.dirname(input_file), 'output.json')
     args['munkres_executable'] = exe
+    args['log_level'] = 'DEBUG'
     n = NwayMatching(input_data=args, args=[])
     n.run()
 
