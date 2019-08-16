@@ -136,46 +136,29 @@ class NwayMatching(ArgSchemaParser):
         segmaskimg = read_tiff_3d(filename_segmask)
         segmaskimg = np.moveaxis(segmaskimg, 1, 2)
 
-        #for i in range(segmasking.shape[0]):
-        #    segmaskimg[i, :, :] = tmp[i, :, :].T
-
         cellnum = len(cell_rois)
         dict_label_to_roiid = dict()
 
-        for i in range(cellnum):
-            x_start = int(cell_rois[i]["x"])
-            y_start = int(cell_rois[i]["y"])
-            z_start = int(cell_rois[i]["z"])
-            width = int(cell_rois[i]["width"])
-            height = int(cell_rois[i]["height"])
+        for cell_roi in cell_rois:
+            x0 = cell_roi["x"]
+            y0 = cell_roi["y"]
+            w = cell_roi["width"]
+            h = cell_roi["height"]
+            # fancy indexing, indices of this sub-region
+            coord = np.mgrid[x0:(x0 + w):1, y0:(y0 + h):1].reshape(2, -1).T
 
-            # Compute coordinates of ROI pixels
-            xscope = range(x_start, x_start + width)
-            yscope = range(y_start, y_start + height)
-            xscope_2d, yscope_2d = np.meshgrid(xscope, yscope)
-            coord = np.vstack((xscope_2d.flatten(), yscope_2d.flatten()))
-            coord = np.transpose(coord)
+            # find unique non-zero labels in sub-region
+            sub = segmaskimg[cell_roi["z"], coord[:, 0], coord[:, 1]]
+            labels = np.delete(np.unique(sub), 0)
 
-            thisframe = segmaskimg[z_start, :, :]
-            labelvalue = np.unique(thisframe[coord[:, 0], coord[:, 1]])
-            labelvalue = labelvalue[labelvalue > 0]
+            # find label with largest area
+            areas = np.array([np.count_nonzero(sub == l) for l in labels])
+            mlabel = labels[np.argmax(areas)]
 
-            labelnum = len(labelvalue)
-            area = np.zeros((labelnum))
-            maxarea = 0
-
-            for j in range(labelnum):
-                area[j] = np.count_nonzero(
-                        thisframe[
-                            coord[:, 0],
-                            coord[:, 1]] == labelvalue[j])
-                if area[j] > maxarea:
-                    maxarea = area[j]
-                    idx = j
-
-            dict_label_to_roiid[labelvalue[idx]] = cell_rois[i]["id"]
+            dict_label_to_roiid[mlabel] = cell_roi["id"]
 
         mask_cellnum = segmaskimg.max()
+        assert mask_cellnum == len(dict_label_to_roiid)
 
         return dict_label_to_roiid, mask_cellnum
 
