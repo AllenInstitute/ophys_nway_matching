@@ -184,62 +184,79 @@ class NwayMatching(ArgSchemaParser):
 
         return matching_table_nway
 
-    def remove_nway_table_redundancy(self, matching_table_nway_ori):
+    @staticmethod
+    def remove_nway_table_redundancy(table):
         '''Remove redundancy from the matching table. Redundancy include lines
            that are the same or one is the subset of another.
         '''
+        # according to the note above, I would think this would work:
+        #linenum, expnum = np.shape(table)
+        #new_table = []
+        #while len(new_table) != len(table):
+        #    tups = []
+        #    for ix in table:
+        #        tups.append(set(
+        #             [tuple((i, v)) for i, v in enumerate(ix) if v != -1]))
 
-        matching_table_nway = np.copy(matching_table_nway_ori)
-        linenum = np.shape(matching_table_nway)[0]
+        #    for i, itup in enumerate(tups):
+        #        for j, jtup in enumerate(tups):
+        #            if j != i:
+        #                if itup.intersection(jtup):
+        #                    newline = np.ones_like(table[i]) * -1
+        #                    ntup = itup.union(jtup)
+        #                    [newline[n[0]] = n[
+
+
+
+        # table = [v for i, v in enumerate(table) if keep[i]]
+        # return table
+
+        # but, it does not, so, I preserve the original logic for now
+        # matching_table_nway = np.copy(matching_table_nway_ori)
+        linenum, expnum = np.shape(table)
         stoptag = 0
 
         while stoptag == 0:
-            matching_table_nway_new = [matching_table_nway[0]]
+            table_new = [table[0]]
 
-            for i in range(1, linenum):  # start from the second line
-                num = np.shape(matching_table_nway_new)[0]
-
-                for j in range(num):
+            for i, oline in enumerate(table[1:], 1):
+                for j, nline in enumerate(table_new):
                     mergetag = 1
-                    postag = np.zeros(self.expnum, dtype=np.int)
+                    omiss = oline == -1
+                    nmiss = nline == -1
+                    
+                    # matches not in any of the same experiments
+                    if np.all(omiss | nmiss):
+                        mergetag = 0
 
-                    for k in range(self.expnum):
-                        if (
-                               (matching_table_nway_new[j][k] !=
-                                   matching_table_nway[i][k]) and
-                               (matching_table_nway[i][k] != -1) and
-                               (matching_table_nway_new[j][k] != -1)):
-                            mergetag = 0
-                            break
-                        if (matching_table_nway_new[j][k] == -1) or \
-                                (matching_table_nway[i][k] == -1):
-                            postag[k] = -1
-
-                    if np.sum(postag) == -self.expnum:
+                    # matches in the same experiment(s), but no match
+                    if np.any(
+                            (nline != oline) &
+                            np.invert(omiss) &
+                            np.invert(nmiss)):
                         mergetag = 0
 
                     if mergetag == 1:
-
-                        for k in range(self.expnum):
-                            if matching_table_nway[i][k] != -1:
-                                matching_table_nway_new[j][k] = \
-                                    matching_table_nway[i][k]
+                        for k in range(expnum):
+                            if oline[k] != -1:
+                                nline[k] = oline[k]
                         break
                         # break for loop j
                         # only merge to one previous record
 
+                # old line unrelated to any new lines, add it
                 if mergetag == 0:
-                    matching_table_nway_new.append(matching_table_nway[i])
+                    table_new.append(oline)
 
-            linenum_new = np.shape(matching_table_nway_new)[0]
+            linenum_new = np.shape(table_new)[0]
 
             if linenum == linenum_new:
                 stoptag = 1
             else:
-                matching_table_nway = np.copy(matching_table_nway_new)
+                table = table_new
                 linenum = linenum_new
 
-        return matching_table_nway_new
+        return table_new
 
     def prune_matching_graph(self, matching_table_nway):
         ''' Prune matching graph to remove matching conflicts.
