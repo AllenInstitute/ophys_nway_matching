@@ -9,7 +9,6 @@ import os
 import re
 import logging
 import subprocess
-import shlex
 import numpy as np
 from PIL import Image as im
 from skimage import measure as ms
@@ -22,6 +21,7 @@ from argschema import ArgSchemaParser
 import tempfile
 
 from nway.schemas import PairwiseMatchingSchema
+import nway.utils as utils
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -59,9 +59,9 @@ def gen_assignment_pairs(cost_matrix, cpp_executable=None):
 
     return mdict
 
+
 def gen_matching_table(
-        cost_matrix, assigned_pairs, distance, iou, max_distance,
-        save_table, output_directory=None, basename=None):
+        cost_matrix, assigned_pairs, distance, iou, max_distance):
     '''Generate self.matching_table using bipartite graph matching.'''
 
     num_matched = 0
@@ -84,16 +84,16 @@ def gen_matching_table(
         if j not in jmatched:
             matching_table.append([-1, j + 1, -1, -1, -1])
 
-    matching_table = np.array(matching_table)
+    return np.array(matching_table)
 
-    if save_table:
-        np.savetxt(
-                os.path.join(output_directory, basename),
-                matching_table,
-                delimiter=' ',
-                fmt="%d %d %7.4e %7.4e %7.4e")
 
-    return matching_table, num_matched
+def save_matching_table(table, output_directory, basename):
+    np.savetxt(
+            os.path.join(output_directory, basename),
+            table,
+            delimiter=' ',
+            fmt="%d %d %7.4e %7.4e %7.4e")
+
 
 def region_properties(mask):
     """Characterize each label region in a mask
@@ -197,6 +197,25 @@ def calculate_cost_matrix(distance, iou, maximum_distance):
     return cost_matrix
 
 
+def cell_matching(labels1, labels2, max_dist, munkres_exe):
+    ''' Function that matches cells. '''
+
+    distance, iou = calculate_distance_and_iou(labels1, labels2)
+
+    cost_matrix = calculate_cost_matrix(distance, iou, max_dist)
+
+    assigned_pairs = gen_assignment_pairs(cost_matrix, munkres_exe)
+
+    matching_table = gen_matching_table(
+            cost_matrix,
+            assigned_pairs,
+            distance,
+            iou,
+            max_dist)
+
+    return matching_table, cost_matrix
+
+
 def transform_masks(moving, dst_shape, tform):
     ''' Transform segmentation masks using the affine
         transformation defined by tform'''
@@ -228,9 +247,16 @@ def transform_masks(moving, dst_shape, tform):
     return transformed_3d
 
 
+cvmotion = {
+        "MOTION_TRANSLATION": cv2.MOTION_TRANSLATION,
+        "MOTION_EUCLIDEAN": cv2.MOTION_EUCLIDEAN,
+        "MOTION_AFFINE": cv2.MOTION_AFFINE,
+        "MOTION_HOMOGRAPHY": cv2.MOTION_HOMOGRAPHY}
+
+
 def register_intensity_images(
         img_path_fixed, img_path_moving, maxCount, epsilon,
-        save_image, output_directory, basename):
+        save_image, output_directory, basename, motiontype):
     ''' Register the average intensity images of the two ophys
         sessions using affine transformation'''
 
@@ -250,7 +276,7 @@ def register_intensity_images(
                 img_fixed,
                 img_moving,
                 np.eye(2, 3, dtype=np.float32),
-                cv2.MOTION_AFFINE,
+                cvmotion[motiontype],
                 criteria)
     except cv2.error:
         logger.error("failed to align images {} and {}".format(
@@ -293,23 +319,6 @@ def imshow3d(img3d, display_row_num, display_col_num):
         plt.imshow(img3d[i, :, :])
 
 
-def read_tiff_3d(filename):
-    '''Read 3d tiff files. '''
-
-    img = sitk.ReadImage(filename.encode('utf-8'))
-    dim = img.GetDimension()
-
-    if dim not in [2, 3]:
-        raise ValueError("Error in read_tiff_3d() Image "
-                         "dimension must be 2 or 3.")
-
-    img3d = sitk.GetArrayFromImage(img).astype('int')
-    if dim == 2:
-        img3d = np.expand_dims(img3d, axis=0)
-
-    return img3d
-
-
 def relabel(maskimg_3d):
     ''' Relabel mask image to make labels continous and unique'''
 
@@ -334,7 +343,7 @@ class PairwiseMatching(ArgSchemaParser):
     '''
 
     def run(self):
-        ''' Pairwise matching of ophys-ophys sessions. ''' 
+        ''' Pairwise matching of ophys-ophys sessions. '''
 
         self.logger.info(
                 'Matching %s against %s ...' % (
@@ -350,20 +359,21 @@ class PairwiseMatching(ArgSchemaParser):
                 self.args['filename_intensity_moving'])[0]
 
         # register the average intensity images
-        tform, moving_warped = register_intensity_images(
+        self.tform, moving_warped = register_intensity_images(
                 self.args['filename_intensity_fixed'],
                 self.args['filename_intensity_moving'],
                 self.args['registration_iterations'],
                 self.args['registration_precision'],
                 self.args['save_registered_image'],
                 self.args['output_directory'],
-                'register_%s_to_%s.tif' % (moving_strid, fixed_strid))
+                'register_%s_to_%s.tif' % (moving_strid, fixed_strid),
+                self.args['motionType'])
 
         # relabel the masks and write to disk
         segmask_fixed_3d = relabel(
-                read_tiff_3d(self.args['filename_segmask_fixed']))
+                utils.read_tiff_3d(self.args['filename_segmask_fixed']))
         segmask_moving_3d = relabel(
-                read_tiff_3d(self.args['filename_segmask_moving']))
+                utils.read_tiff_3d(self.args['filename_segmask_moving']))
 
         filename_segmask_fixed_relabel = os.path.join(
             self.args['output_directory'],
@@ -388,67 +398,26 @@ class PairwiseMatching(ArgSchemaParser):
         segmask_moving_3d_registered = transform_masks(
                 segmask_moving_3d,
                 segmask_fixed_3d.shape[1:],
-                tform)
+                self.tform)
 
         # matching cells
-        [matching_ratio_fixed, matching_ratio_moving, weight_matrix] = \
-            self.cell_matching(
+        self.matching_table, self.cost_matrix = cell_matching(
                     segmask_fixed_3d,
                     segmask_moving_3d_registered,
+                    self.args['maximum_distance'],
+                    self.args['munkres_executable'])
+
+        if self.args['save_pairwise_tables']:
+            save_matching_table(
+                    self.matching_table,
+                    self.args['output_directory'],
                     moving_strid + '_to_' + fixed_strid)
 
-        matching_pairs = dict()
-        matching_pairs['res'] = self.matching_table
-        matching_pairs['mr_i'] = matching_ratio_fixed
-        matching_pairs['mr_j'] = matching_ratio_moving
-        matching_pairs['segmask_i'] = segmask_fixed_3d
-        matching_pairs['segmask_j'] = segmask_moving_3d_registered
-        matching_pairs['weight_matrix'] = weight_matrix
-        matching_pairs['moving'] = self.args['filename_intensity_moving']
-        matching_pairs['fixed'] = self.args['filename_intensity_fixed']
-
         # if affine only, output full 3x3
-        if tform.shape == (2, 3):
-            tform = np.vstack((tform, [0, 0, 1]))
+        if self.tform.shape == (2, 3):
+            self.tform = np.vstack((self.tform, [0, 0, 1]))
 
-        matching_pairs['transform'] = np.round(tform, 6).tolist()
-
-        return matching_pairs
-
-    def cell_matching(
-            self, segmask_fixed, segmask_moving, filename_matching_table):
-        ''' Function that matches cells. '''
-
-        distance, iou = calculate_distance_and_iou(
-                segmask_fixed,
-                segmask_moving)
-
-        cost_matrix = calculate_cost_matrix(
-                distance,
-                iou,
-                self.args['maximum_distance'])
-
-        assigned_pairs = gen_assignment_pairs(
-                cost_matrix,
-                cpp_executable=self.args['munkres_executable'])
-
-        self.matching_table, num_matched = gen_matching_table(
-                cost_matrix,
-                assigned_pairs,
-                distance,
-                iou,
-                self.args['maximum_distance'],
-                self.args['save_pairwise_tables'],
-                self.args['output_directory'],
-                filename_matching_table)
-
-        matching_ratio_fixed = np.float(num_matched) / distance.shape[0]
-        matching_ratio_moving = np.float(num_matched) / distance.shape[1]
-
-        return (
-                matching_ratio_fixed,
-                matching_ratio_moving,
-                cost_matrix)
+        return
 
 
 if __name__ == "__main__":

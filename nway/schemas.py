@@ -2,6 +2,7 @@ from argschema import ArgSchema
 from argschema.fields import (
         Boolean, Int, Str, Float,
         InputFile, OutputDir)
+import marshmallow as mm
 
 
 class NwayMatchingSchema(ArgSchema):
@@ -48,6 +49,18 @@ class NwayMatchingSchema(ArgSchema):
         description=("passed to re.findall() as search pattern "
                      "on the input intensity filename and used "
                      "for naming intermediate and output files. "))
+    motionType = Str(
+        required=False,
+        missing="MOTION_AFFINE",
+        default="MOTION_AFFINE",
+        validator=mm.validate.OneOf([
+            "MOTION_TRANSLATION",
+            "MOTION_EUCLIDEAN",
+            "MOTION_AFFINE",
+            "MOTION_HOMOGRAPHY"
+            ]),
+        description=("motion model passed to cv2.findTransformECC"
+                     "during image registration step."))
 
 
 class PairwiseMatchingSchema(NwayMatchingSchema):

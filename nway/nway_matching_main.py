@@ -16,8 +16,9 @@ import numpy as np
 import SimpleITK as sitk
 import os
 import re
-from nway.pairwise_matching import PairwiseMatching, read_tiff_3d
+from nway.pairwise_matching import PairwiseMatching
 from nway.schemas import NwayMatchingSchema
+import nway.utils as utils
 from argschema import ArgSchemaParser
 
 logger = logging.getLogger(__name__)
@@ -126,17 +127,15 @@ class NwayMatching(ArgSchemaParser):
         filename_segmask = os.path.join(
                 self.args['output_directory'],
                 filename_exp_prefix_fixed + '_maxInt_masks_relabel.tif')
-        expnum = len(data['experiment_containers']['ophys_experiments'])
 
         for this_exp in data['experiment_containers']['ophys_experiments']:
             if filename_exp_prefix_fixed in this_exp['max_int_mask_image']:
                 cell_rois = this_exp['cell_rois']
                 break
 
-        segmaskimg = read_tiff_3d(filename_segmask)
+        segmaskimg = utils.read_tiff_3d(filename_segmask)
         segmaskimg = np.moveaxis(segmaskimg, 1, 2)
 
-        cellnum = len(cell_rois)
         dict_label_to_roiid = dict()
 
         for cell_roi in cell_rois:
@@ -174,7 +173,7 @@ class NwayMatching(ArgSchemaParser):
 
         for i in range(self.expnum - 1):
             for j in range(i + 1, self.expnum):
-                for line in self.matching_res_dict[cnt]['res']:
+                for line in self.pair_matches[cnt].matching_table:
                     if (line[0] != -1) & (line[1] != -1):
                         this_record = np.zeros(self.expnum, dtype='int') - 1
                         this_record[i] = line[0]
@@ -189,28 +188,6 @@ class NwayMatching(ArgSchemaParser):
         '''Remove redundancy from the matching table. Redundancy include lines
            that are the same or one is the subset of another.
         '''
-        # according to the note above, I would think this would work:
-        #linenum, expnum = np.shape(table)
-        #new_table = []
-        #while len(new_table) != len(table):
-        #    tups = []
-        #    for ix in table:
-        #        tups.append(set(
-        #             [tuple((i, v)) for i, v in enumerate(ix) if v != -1]))
-
-        #    for i, itup in enumerate(tups):
-        #        for j, jtup in enumerate(tups):
-        #            if j != i:
-        #                if itup.intersection(jtup):
-        #                    newline = np.ones_like(table[i]) * -1
-        #                    ntup = itup.union(jtup)
-        #                    [newline[n[0]] = n[
-
-
-
-        # table = [v for i, v in enumerate(table) if keep[i]]
-        # return table
-
         # but, it does not, so, I preserve the original logic for now
         # matching_table_nway = np.copy(matching_table_nway_ori)
         linenum, expnum = np.shape(table)
@@ -224,7 +201,7 @@ class NwayMatching(ArgSchemaParser):
                     mergetag = 1
                     omiss = oline == -1
                     nmiss = nline == -1
-                    
+
                     # matches not in any of the same experiments
                     if np.all(omiss | nmiss):
                         mergetag = 0
@@ -279,14 +256,14 @@ class NwayMatching(ArgSchemaParser):
 
             for j in range(self.expnum - 1):
                 for k in range(j + 1, self.expnum):
-                    [cellnum1, cellnum2] = np.shape(
-                            self.matching_res_dict[cnt]['weight_matrix'])
+                    [cellnum1, cellnum2] = \
+                            self.pair_matches[cnt].cost_matrix.shape
                     if (
                             (matching_table_nway[i][j]-1 < cellnum1) and
                             (matching_table_nway[i][k]-1 < cellnum2)):
                         score[i] = \
                                 score[i] + \
-                                self.matching_res_dict[cnt]['weight_matrix'][
+                                self.pair_matches[cnt].cost_matrix[
                                         matching_table_nway[i][j] - 1][
                                                 matching_table_nway[i][k] - 1]
                         cnt = cnt + 1
@@ -411,11 +388,12 @@ class NwayMatching(ArgSchemaParser):
             matchingdata["cell_rois"][labelstr] = thisrgn
 
         matchingdata["transforms"] = []
-        for k in self.matching_res_dict:
+        for k in self.pair_matches:
             matchingdata["transforms"].append({
-                "moving": k['moving'],
-                "fixed": k['fixed'],
-                "transform": k['transform']})
+                "moving": k.args['filename_intensity_moving'],
+                "fixed": k.args['filename_intensity_fixed'],
+                "transform": k.tform.tolist(),
+                "properties": utils.calc_first_order_properties(k.tform)})
 
         with open(output_json, 'w') as myfile:
             json.dump(matchingdata, myfile, sort_keys=True, indent=4)
@@ -431,7 +409,7 @@ class NwayMatching(ArgSchemaParser):
                 self.args['output_directory'],
                 self.filename_exp_prefix[k] + '_maxInt_masks_relabel.tif')
             segmask_3d = \
-                read_tiff_3d(filename_segmask_relabel)
+                utils.read_tiff_3d(filename_segmask_relabel)
 
             matching_mask = np.zeros(segmask_3d.shape)
             linenum = np.shape(self.matching_table_nway)[0]
@@ -450,7 +428,6 @@ class NwayMatching(ArgSchemaParser):
            matching and then combining the results'''
 
         # pair-wise matching
-        self.matching_res_dict = []
         self.pair_matches = []
         for i in range(self.expnum - 1):
             pair_args = dict(self.args)
@@ -466,9 +443,7 @@ class NwayMatching(ArgSchemaParser):
 
                 self.pair_matches.append(
                         PairwiseMatching(input_data=pair_args, args=[]))
-                matching_pair = self.pair_matches[-1].run()
-
-                self.matching_res_dict.append(matching_pair)
+                self.pair_matches[-1].run()
 
         # generate label id to roi id dictionary
         self.dict_label_to_roiid = []
@@ -485,17 +460,12 @@ class NwayMatching(ArgSchemaParser):
 
         matching_table_nway_tmp = self.remove_nway_table_redundancy(
                 matching_table_nway_tmp)
-        logger.info('Pass.')
 
-        logger.info('Pruning matching graph ...')
         matching_table_nway_tmp = self.prune_matching_graph(
                 matching_table_nway_tmp)
-        logger.info('Pass.')
 
-        logger.info('Adding standalone cells ...')
         self.matching_table_nway = self.add_remaining_cells(
                 matching_table_nway_tmp)
-        logger.info('Pass.')
 
         return
 
@@ -506,16 +476,6 @@ class NwayMatching(ArgSchemaParser):
             2) Pairwise matching;
             3) Combining pairwise matching to generate Nway result.
         '''
-
-        #self.args['output_directory'] = ""
-        self.filename_intensity = []
-        self.filename_segmask = []
-        self.filename_exp_prefix = []
-        self.expnum = 0
-        self.matching_res_dict = []
-        self.dict_label_to_roiid = []
-        self.mask_cellnum = []
-        self.matching_table_nway = []
 
         self.parse_jsons(self.args['input_json'])
 
