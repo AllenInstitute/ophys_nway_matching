@@ -11,11 +11,11 @@ Usage:
 '''
 
 import logging
-import json
 import numpy as np
 import SimpleITK as sitk
 import os
-import re
+import json
+import itertools
 from nway.pairwise_matching import PairwiseMatching
 from nway.schemas import NwayMatchingSchema
 import nway.utils as utils
@@ -23,6 +23,45 @@ from argschema import ArgSchemaParser
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
+
+
+def cleanup_roi_dict(experiment):
+    '''Generate label to roi id mapping dictionary. ROIs are coded in input json.
+       Labels are coded in segmented cell mask images.
+    '''
+
+    mask = utils.read_tiff_3d(experiment['max_int_mask_image'])
+    mask = np.moveaxis(mask, 1, 2)
+
+    new_dict = {}
+
+    for cell_roi in experiment['cell_rois']:
+        x0 = cell_roi["x"]
+        y0 = cell_roi["y"]
+        w = cell_roi["width"]
+        h = cell_roi["height"]
+
+        # this should just use mask_matrix??
+
+        # fancy indexing, indices of this sub-region
+        coord = np.mgrid[x0:(x0 + w):1, y0:(y0 + h):1].reshape(2, -1).T
+        sub = mask[cell_roi["z"], coord[:, 0], coord[:, 1]]
+
+        # find label with largest area
+        labels = np.unique(sub)
+        labels = labels[labels != 0]
+
+        areas = np.array([np.count_nonzero(sub == label) for label in labels])
+
+        maxlabel = labels[np.argmax(areas)]
+        new_dict[cell_roi["id"]] = {
+            "z": cell_roi["z"],
+            "label": maxlabel
+            }
+
+        experiment['cell_rois'] = new_dict
+
+    return experiment
 
 
 class NwayMatching(ArgSchemaParser):
@@ -86,35 +125,20 @@ class NwayMatching(ArgSchemaParser):
         '''Parse input json file to genearte the
            necessary input files for nway cell matching.'''
 
-        json_data = open(input_json).read()
-        data = json.loads(json_data)
+        with open(input_json, 'r') as f:
+            data = json.load(f)
 
         self.args['output_directory'] = str(data['output_directory'])
-        self.expnum = len(data['experiment_containers']['ophys_experiments'])
+        self.experiments = []
+        for exp in data['experiment_containers']['ophys_experiments']:
+            self.experiments.append(cleanup_roi_dict(exp))
 
-        self.filename_intensity = ["" for x in range(self.expnum)]
-        self.filename_segmask = ["" for x in range(self.expnum)]
-        self.filename_exp_prefix = ["" for x in range(self.expnum)]
+        self.expnum = len(self.experiments)
 
         if self.expnum < 2:
             raise RuntimeError(
                     "There should be at least two "
                     "experiments! Check input json.")
-
-        for i in range(self.expnum):
-
-            this_exp = data['experiment_containers']['ophys_experiments'][i]
-
-            # str() convert unicode string to regular string
-            self.filename_intensity[i] = \
-                str(
-                    this_exp['ophys_average_intensity_projection_image'])
-            self.filename_segmask[i] = str(this_exp['max_int_mask_image'])
-            self.filename_exp_prefix[i] = re.findall(
-                    self.args['id_pattern'], self.filename_intensity[i])[0]
-
-        logger.debug('Intensity images are: ', self.filename_intensity)
-        logger.debug('Cell mask images are: ', self.filename_segmask)
 
     def gen_label_roi_dict(self, filename_exp_prefix_fixed, input_json):
         '''Generate label to roi id mapping dictionary. ROIs are coded in input json.
@@ -390,8 +414,10 @@ class NwayMatching(ArgSchemaParser):
         matchingdata["transforms"] = []
         for k in self.pair_matches:
             matchingdata["transforms"].append({
-                "moving": k.args['filename_intensity_moving'],
-                "fixed": k.args['filename_intensity_fixed'],
+                "moving": k.args['moving'][
+                    'ophys_average_intensity_projection_image'],
+                "fixed": k.args['fixed'][
+                    'ophys_average_intensity_projection_image'],
                 "transform": k.tform.tolist(),
                 "properties": utils.calc_first_order_properties(k.tform)})
 
@@ -404,10 +430,10 @@ class NwayMatching(ArgSchemaParser):
         for k in range(self.expnum):
             outimgfilename = os.path.join(
                 self.args['output_directory'],
-                self.filename_exp_prefix[k] + '_matching.tif')
+                '%d_matching.tif' % self.experiments[k]['id'])
             filename_segmask_relabel = os.path.join(
                 self.args['output_directory'],
-                self.filename_exp_prefix[k] + '_maxInt_masks_relabel.tif')
+                '%d_maxInt_masks_relabel.tif' % self.experiments[k]['id'])
             segmask_3d = \
                 utils.read_tiff_3d(filename_segmask_relabel)
 
@@ -429,21 +455,13 @@ class NwayMatching(ArgSchemaParser):
 
         # pair-wise matching
         self.pair_matches = []
-        for i in range(self.expnum - 1):
+        for fixed, moving in itertools.combinations(self.experiments, 2):
             pair_args = dict(self.args)
-            pair_args['filename_intensity_fixed'] = self.filename_intensity[i]
-            pair_args['filename_segmask_fixed'] = self.filename_segmask[i]
-            pair_args['output_directory'] = self.args['output_directory']
-
-            for j in range(i + 1, self.expnum):
-                pair_args['filename_intensity_moving'] = \
-                    self.filename_intensity[j]
-                pair_args['filename_segmask_moving'] = \
-                    self.filename_segmask[j]
-
-                self.pair_matches.append(
-                        PairwiseMatching(input_data=pair_args, args=[]))
-                self.pair_matches[-1].run()
+            pair_args["fixed"] = fixed
+            pair_args["moving"] = moving
+            self.pair_matches.append(
+                    PairwiseMatching(input_data=pair_args, args=[]))
+            self.pair_matches[-1].run()
 
         # generate label id to roi id dictionary
         self.dict_label_to_roiid = []
@@ -451,7 +469,8 @@ class NwayMatching(ArgSchemaParser):
         for i in range(self.expnum):
             this_dict_label_to_roiid, self.mask_cellnum[i] = \
                     self.gen_label_roi_dict(
-                            self.filename_exp_prefix[i], para['input_json'])
+                            '%d' % self.experiments[i]['id'],
+                            para['input_json'])
             self.dict_label_to_roiid = np.append(
                     self.dict_label_to_roiid, this_dict_label_to_roiid)
 

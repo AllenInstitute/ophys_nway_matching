@@ -6,7 +6,6 @@ Pair-wise matching called by nway matching main function
 Copyright (c) Allen Institute for Brain Science
 """
 import os
-import re
 import logging
 import subprocess
 import numpy as np
@@ -345,23 +344,20 @@ class PairwiseMatching(ArgSchemaParser):
     def run(self):
         ''' Pairwise matching of ophys-ophys sessions. '''
 
-        self.logger.info(
-                'Matching %s against %s ...' % (
-                    self.args['filename_intensity_moving'],
-                    self.args['filename_intensity_fixed']))
+        self.logger.info('Matching %d to %d ...' % (
+            self.args['fixed']['id'],
+            self.args['moving']['id']))
 
         # identifying strings for filenames
-        fixed_strid = re.findall(
-                self.args['id_pattern'],
-                self.args['filename_intensity_fixed'])[0]
-        moving_strid = re.findall(
-                self.args['id_pattern'],
-                self.args['filename_intensity_moving'])[0]
+        fixed_strid = '%s' % self.args['fixed']['id']
+        moving_strid = '%s' % self.args['moving']['id']
 
         # register the average intensity images
         self.tform, moving_warped = register_intensity_images(
-                self.args['filename_intensity_fixed'],
-                self.args['filename_intensity_moving'],
+                self.args['fixed'][
+                    'ophys_average_intensity_projection_image'],
+                self.args['moving'][
+                    'ophys_average_intensity_projection_image'],
                 self.args['registration_iterations'],
                 self.args['registration_precision'],
                 self.args['save_registered_image'],
@@ -371,9 +367,9 @@ class PairwiseMatching(ArgSchemaParser):
 
         # relabel the masks and write to disk
         segmask_fixed_3d = relabel(
-                utils.read_tiff_3d(self.args['filename_segmask_fixed']))
+                utils.read_tiff_3d(self.args['fixed']['max_int_mask_image']))
         segmask_moving_3d = relabel(
-                utils.read_tiff_3d(self.args['filename_segmask_moving']))
+                utils.read_tiff_3d(self.args['moving']['max_int_mask_image']))
 
         filename_segmask_fixed_relabel = os.path.join(
             self.args['output_directory'],
