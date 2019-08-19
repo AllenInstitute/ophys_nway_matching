@@ -1,7 +1,8 @@
 from argschema import ArgSchema
+from argschema.schemas import DefaultSchema
 from argschema.fields import (
-        Boolean, Int, Str, Float,
-        InputFile, OutputDir)
+        Boolean, Int, Str, Float, List,
+        Dict, InputFile, OutputDir, Nested)
 import marshmallow as mm
 
 
@@ -62,20 +63,24 @@ class NwayMatchingSchema(ArgSchema):
         description=("motion model passed to cv2.findTransformECC"
                      "during image registration step."))
 
+class ExperimentSchema(DefaultSchema):
+    id = Int(
+        required=True,
+        description="experiment id")
+    ophys_average_intensity_projection_image = InputFile(
+        required=True,
+        description="max projection intensity image")
+    max_int_mask_image = InputFile(
+        required=True,
+        description="mask image")
+    cell_rois = Dict(
+        required=True,
+        description='dict mapping of ids, labels, zs,')
+
 
 class PairwiseMatchingSchema(NwayMatchingSchema):
-    filename_intensity_fixed = InputFile(
-        required=True,
-        description="path to fixed intensity image")
-    filename_segmask_fixed = InputFile(
-        required=True,
-        description="path to fixed segmentation mask")
-    filename_intensity_moving = InputFile(
-        required=True,
-        description="path to moving intensity image")
-    filename_segmask_moving = InputFile(
-        required=True,
-        description="path to moving segmentation mask")
     output_directory = OutputDir(
         required=True,
         description="destination for output files")
+    fixed = Nested(ExperimentSchema)
+    moving = Nested(ExperimentSchema)

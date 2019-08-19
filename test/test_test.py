@@ -48,7 +48,8 @@ def test_against_old_results(input_file, exe):
             os.path.dirname(input_file), 'output.json')
     args['munkres_executable'] = exe
     #args['motionType'] = "MOTION_EUCLIDEAN"
-    args['log_level'] = 'DEBUG'
+    args['save_pairwise_tables'] = True
+
     n = NwayMatching(input_data=args, args=[])
     n.run()
 

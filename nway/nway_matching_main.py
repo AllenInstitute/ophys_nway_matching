@@ -16,6 +16,7 @@ import numpy as np
 import SimpleITK as sitk
 import os
 import re
+import itertools
 from nway.pairwise_matching import PairwiseMatching
 from nway.schemas import NwayMatchingSchema
 import nway.utils as utils
@@ -23,6 +24,45 @@ from argschema import ArgSchemaParser
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
+
+
+def cleanup_roi_dict(experiment):
+    '''Generate label to roi id mapping dictionary. ROIs are coded in input json.
+       Labels are coded in segmented cell mask images.
+    '''
+
+    mask = utils.read_tiff_3d(experiment['max_int_mask_image'])
+    mask = np.moveaxis(mask, 1, 2)
+
+    new_dict = {}
+
+    for cell_roi in experiment['cell_rois']:
+        x0 = cell_roi["x"]
+        y0 = cell_roi["y"]
+        w = cell_roi["width"]
+        h = cell_roi["height"]
+
+        # this should just use mask_matrix??
+
+        # fancy indexing, indices of this sub-region
+        coord = np.mgrid[x0:(x0 + w):1, y0:(y0 + h):1].reshape(2, -1).T
+        sub = mask[cell_roi["z"], coord[:, 0], coord[:, 1]]
+
+        # find label with largest area
+        labels = np.unique(sub)
+        labels = labels[labels != 0]
+
+        areas = np.array([np.count_nonzero(sub == label) for label in labels])
+
+        maxlabel = labels[np.argmax(areas)]
+        new_dict[cell_roi["id"]] = {
+            "z": cell_roi["z"],
+            "label": maxlabel
+            }
+
+    experiment['cell_rois'] = new_dict
+
+    return experiment
 
 
 class NwayMatching(ArgSchemaParser):
@@ -33,133 +73,120 @@ class NwayMatching(ArgSchemaParser):
         result is obtained by combining pairwise matching.
     '''
 
-    def parse_jsons_with_reference_keyword(self, input_json):
-        ''' Parse input json file to genearte the necessary input files
-            for nway cell matching. This function deals with the old
-            input json file format, with the 'reference_experiment' keyword.
-        '''
+    #def parse_jsons_with_reference_keyword(self, input_json):
+    #    ''' Parse input json file to genearte the necessary input files
+    #        for nway cell matching. This function deals with the old
+    #        input json file format, with the 'reference_experiment' keyword.
+    #    '''
 
-        json_data = open(input_json).read()
-        data = json.loads(json_data)
+    #    json_data = open(input_json).read()
+    #    data = json.loads(json_data)
 
-        self.args['output_directory'] = str(data['output_directory'])
-        self.expnum = len(data['experiment_containers']['ophys_experiments'])
+    #    self.args['output_directory'] = str(data['output_directory'])
+    #    self.expnum = len(data['experiment_containers']['ophys_experiments'])
 
-        self.filename_intensity = ["" for x in range(self.expnum)]
-        self.filename_segmask = ["" for x in range(self.expnum)]
-        self.filename_exp_prefix = ["" for x in range(self.expnum)]
+    #    self.filename_intensity = ["" for x in range(self.expnum)]
+    #    self.filename_segmask = ["" for x in range(self.expnum)]
+    #    self.filename_exp_prefix = ["" for x in range(self.expnum)]
 
-        if self.expnum < 2:
-            raise RuntimeError(
-                    "There should be at least two "
-                    "experiments! Check input json.")
+    #    if self.expnum < 2:
+    #        raise RuntimeError(
+    #                "There should be at least two "
+    #                "experiments! Check input json.")
 
-        count = 1
-        for i in range(self.expnum):
+    #    count = 1
+    #    for i in range(self.expnum):
 
-            this_exp = data['experiment_containers']['ophys_experiments'][i]
+    #        this_exp = data['experiment_containers']['ophys_experiments'][i]
 
-            reference_experiment = this_exp['reference_experiment']
-            if str(reference_experiment).upper() == "TRUE":
-                # the reference is #0
-                # str() convert unicode string to regular string
-                self.filename_intensity[0] = \
-                    str(this_exp['ophys_average_intensity_projection_image'])
-                self.filename_segmask[0] = str(this_exp['max_int_mask_image'])
-                ind = self.filename_intensity[0].find('ophys_experiment_')
-                self.filename_exp_prefix[0] = \
-                    self.filename_intensity[0][ind:ind + 26]
-            else:
-                self.filename_intensity[count] = \
-                    str(this_exp['ophys_average_intensity_projection_image'])
-                self.filename_segmask[count] = \
-                    str(this_exp['max_int_mask_image'])
-                ind = self.filename_intensity[count].find('ophys_experiment_')
-                self.filename_exp_prefix[count] = \
-                    self.filename_intensity[count][ind:ind + 26]
-                count = count + 1
+    #        reference_experiment = this_exp['reference_experiment']
+    #        if str(reference_experiment).upper() == "TRUE":
+    #            # the reference is #0
+    #            # str() convert unicode string to regular string
+    #            self.filename_intensity[0] = \
+    #                str(this_exp['ophys_average_intensity_projection_image'])
+    #            self.filename_segmask[0] = str(this_exp['max_int_mask_image'])
+    #            ind = self.filename_intensity[0].find('ophys_experiment_')
+    #            self.filename_exp_prefix[0] = \
+    #                self.filename_intensity[0][ind:ind + 26]
+    #        else:
+    #            self.filename_intensity[count] = \
+    #                str(this_exp['ophys_average_intensity_projection_image'])
+    #            self.filename_segmask[count] = \
+    #                str(this_exp['max_int_mask_image'])
+    #            ind = self.filename_intensity[count].find('ophys_experiment_')
+    #            self.filename_exp_prefix[count] = \
+    #                self.filename_intensity[count][ind:ind + 26]
+    #            count = count + 1
 
-        logger.debug('Intensity images are: ', self.filename_intensity)
-        logger.debug('Cell mask images are: ', self.filename_segmask)
+    #    logger.debug('Intensity images are: ', self.filename_intensity)
+    #    logger.debug('Cell mask images are: ', self.filename_segmask)
 
     def parse_jsons(self, input_json):
         '''Parse input json file to genearte the
            necessary input files for nway cell matching.'''
 
-        json_data = open(input_json).read()
-        data = json.loads(json_data)
+        with open(input_json, 'r') as f:
+            data = json.load(f)
 
         self.args['output_directory'] = str(data['output_directory'])
-        self.expnum = len(data['experiment_containers']['ophys_experiments'])
+        self.experiments = []
+        for exp in data['experiment_containers']['ophys_experiments']:
+            #exp_id = re.findall(
+            #        self.args['id_pattern'],
+            #        exp['ophys_average_intensity_projection_image'])
+            self.experiments.append(cleanup_roi_dict(exp))
 
-        self.filename_intensity = ["" for x in range(self.expnum)]
-        self.filename_segmask = ["" for x in range(self.expnum)]
-        self.filename_exp_prefix = ["" for x in range(self.expnum)]
-
-        if self.expnum < 2:
+        if len(self.experiments) < 2:
             raise RuntimeError(
                     "There should be at least two "
                     "experiments! Check input json.")
 
-        for i in range(self.expnum):
 
-            this_exp = data['experiment_containers']['ophys_experiments'][i]
+    #def gen_label_roi_dict(self, filename_exp_prefix_fixed, input_json):
+    #    '''Generate label to roi id mapping dictionary. ROIs are coded in input json.
+    #       Labels are coded in segmented cell mask images.
+    #    '''
 
-            # str() convert unicode string to regular string
-            self.filename_intensity[i] = \
-                str(
-                    this_exp['ophys_average_intensity_projection_image'])
-            self.filename_segmask[i] = str(this_exp['max_int_mask_image'])
-            self.filename_exp_prefix[i] = re.findall(
-                    self.args['id_pattern'], self.filename_intensity[i])[0]
+    #    with open(input_json, 'r') as f:
+    #        data = json.load(f)
 
-        logger.debug('Intensity images are: ', self.filename_intensity)
-        logger.debug('Cell mask images are: ', self.filename_segmask)
+    #    filename_segmask = os.path.join(
+    #            self.args['output_directory'],
+    #            filename_exp_prefix_fixed + '_maxInt_masks_relabel.tif')
 
-    def gen_label_roi_dict(self, filename_exp_prefix_fixed, input_json):
-        '''Generate label to roi id mapping dictionary. ROIs are coded in input json.
-           Labels are coded in segmented cell mask images.
-        '''
+    #    for this_exp in data['experiment_containers']['ophys_experiments']:
+    #        if filename_exp_prefix_fixed in this_exp['max_int_mask_image']:
+    #            cell_rois = this_exp['cell_rois']
+    #            break
 
-        with open(input_json, 'r') as f:
-            data = json.load(f)
+    #    segmaskimg = utils.read_tiff_3d(filename_segmask)
+    #    segmaskimg = np.moveaxis(segmaskimg, 1, 2)
 
-        filename_segmask = os.path.join(
-                self.args['output_directory'],
-                filename_exp_prefix_fixed + '_maxInt_masks_relabel.tif')
+    #    dict_label_to_roiid = dict()
 
-        for this_exp in data['experiment_containers']['ophys_experiments']:
-            if filename_exp_prefix_fixed in this_exp['max_int_mask_image']:
-                cell_rois = this_exp['cell_rois']
-                break
+    #    for cell_roi in cell_rois:
+    #        x0 = cell_roi["x"]
+    #        y0 = cell_roi["y"]
+    #        w = cell_roi["width"]
+    #        h = cell_roi["height"]
+    #        # fancy indexing, indices of this sub-region
+    #        coord = np.mgrid[x0:(x0 + w):1, y0:(y0 + h):1].reshape(2, -1).T
 
-        segmaskimg = utils.read_tiff_3d(filename_segmask)
-        segmaskimg = np.moveaxis(segmaskimg, 1, 2)
+    #        # find unique non-zero labels in sub-region
+    #        sub = segmaskimg[cell_roi["z"], coord[:, 0], coord[:, 1]]
+    #        labels = np.delete(np.unique(sub), 0)
 
-        dict_label_to_roiid = dict()
+    #        # find label with largest area
+    #        areas = np.array([np.count_nonzero(sub == l) for l in labels])
+    #        mlabel = labels[np.argmax(areas)]
 
-        for cell_roi in cell_rois:
-            x0 = cell_roi["x"]
-            y0 = cell_roi["y"]
-            w = cell_roi["width"]
-            h = cell_roi["height"]
-            # fancy indexing, indices of this sub-region
-            coord = np.mgrid[x0:(x0 + w):1, y0:(y0 + h):1].reshape(2, -1).T
+    #        dict_label_to_roiid[mlabel] = cell_roi["id"]
 
-            # find unique non-zero labels in sub-region
-            sub = segmaskimg[cell_roi["z"], coord[:, 0], coord[:, 1]]
-            labels = np.delete(np.unique(sub), 0)
+    #    mask_cellnum = segmaskimg.max()
+    #    assert mask_cellnum == len(dict_label_to_roiid)
 
-            # find label with largest area
-            areas = np.array([np.count_nonzero(sub == l) for l in labels])
-            mlabel = labels[np.argmax(areas)]
-
-            dict_label_to_roiid[mlabel] = cell_roi["id"]
-
-        mask_cellnum = segmaskimg.max()
-        assert mask_cellnum == len(dict_label_to_roiid)
-
-        return dict_label_to_roiid, mask_cellnum
+    #    return dict_label_to_roiid, mask_cellnum
 
     def gen_nway_table_with_redundancy(self):
         '''Generate initial Nway matching table with redundancy rows by
@@ -169,17 +196,28 @@ class NwayMatching(ArgSchemaParser):
         matching_table_nway = []
         # counter for each pair-wise matching,
         # maximum value is C(N,2), N means Nway
-        cnt = 0
+        # cnt = 0
 
-        for i in range(self.expnum - 1):
-            for j in range(i + 1, self.expnum):
-                for line in self.pair_matches[cnt].matching_table:
-                    if (line[0] != -1) & (line[1] != -1):
-                        this_record = np.zeros(self.expnum, dtype='int') - 1
-                        this_record[i] = line[0]
-                        this_record[j] = line[1]
-                        matching_table_nway.append(this_record)
-                cnt += 1
+        eids = [i['id'] for i in self.experiments]
+
+        for pair_match in self.pair_matches:
+            fid = eids.index(pair_match.matches['fixed_id'])
+            mid = eids.index(pair_match.matches['moving_id'])
+            for match in pair_match.matches['matches']:
+                this_record = np.zeros(len(self.experiments), dtype='int') - 1
+                this_record[fid] = match['match'][0]
+                this_record[mid] = match['match'][1]
+                matching_table_nway.append(this_record)
+
+        # for i in range(self.expnum - 1):
+        #     for j in range(i + 1, self.expnum):
+        #         for line in self.pair_matches[cnt].matching_table:
+        #             if (line[0] != -1) & (line[1] != -1):
+        #                 this_record = np.zeros(self.expnum, dtype='int') - 1
+        #                 this_record[i] = line[0]
+        #                 this_record[j] = line[1]
+        #                 matching_table_nway.append(this_record)
+        #         cnt += 1
 
         return matching_table_nway
 
@@ -247,6 +285,7 @@ class NwayMatching(ArgSchemaParser):
         linenum = np.shape(matching_table_nway)[0]
         score = np.zeros(linenum)
         matching_table_nway_new = []
+        eids = [i['id'] for i in self.experiments]
 
         # compute score for each record in matching_table_nway
         for i in range(linenum):
@@ -254,20 +293,35 @@ class NwayMatching(ArgSchemaParser):
             score[i] = 0
             cnt = 0
 
-            for j in range(self.expnum - 1):
-                for k in range(j + 1, self.expnum):
-                    [cellnum1, cellnum2] = \
-                            self.pair_matches[cnt].cost_matrix.shape
-                    if (
-                            (matching_table_nway[i][j]-1 < cellnum1) and
-                            (matching_table_nway[i][k]-1 < cellnum2)):
-                        score[i] = \
-                                score[i] + \
-                                self.pair_matches[cnt].cost_matrix[
-                                        matching_table_nway[i][j] - 1][
-                                                matching_table_nway[i][k] - 1]
-                        cnt = cnt + 1
+            for pair_match in self.pair_matches:
+                cellnum1, cellnum2 = pair_match.cost_matrix.shape
+                fid = eids.index(pair_match.matches['fixed_id'])
+                mid = eids.index(pair_match.matches['moving_id'])
+                if (
+                        (matching_table_nway[i][fid]-1 < cellnum1) and
+                        (matching_table_nway[i][mid]-1 < cellnum2)):
+                    score[i] = \
+                            score[i] + \
+                            self.pair_matches[cnt].cost_matrix[
+                                    matching_table_nway[i][fid] - 1][
+                                            matching_table_nway[i][mid] - 1]
+                    cnt = cnt + 1
             score[i] = score[i]/cnt
+
+            # for j in range(self.expnum - 1):
+            #     for k in range(j + 1, self.expnum):
+            #         [cellnum1, cellnum2] = \
+            #                 self.pair_matches[cnt].cost_matrix.shape
+            #         if (
+            #                 (matching_table_nway[i][j]-1 < cellnum1) and
+            #                 (matching_table_nway[i][k]-1 < cellnum2)):
+            #             score[i] = \
+            #                     score[i] + \
+            #                     self.pair_matches[cnt].cost_matrix[
+            #                             matching_table_nway[i][j] - 1][
+            #                                     matching_table_nway[i][k] - 1]
+            #             cnt = cnt + 1
+            # score[i] = score[i]/cnt
 
         # if two records share common elements in the
         # same column, then create an edge between them
@@ -276,8 +330,7 @@ class NwayMatching(ArgSchemaParser):
 
         for i in range(linenum - 1):  # start from the second line
             for j in range(i + 1, linenum):
-                for k in range(self.expnum):
-
+                for k in range(len(self.experiments)):
                     if (
                            (matching_table_nway[j][k] ==
                                matching_table_nway[i][k]) and
@@ -326,19 +379,20 @@ class NwayMatching(ArgSchemaParser):
         matching_table_nway_new = matching_table_nway
         label_remain = []
 
-        for j in range(self.expnum):
+        nexp = len(self.experiments)
+        for j in range(nexp):
             labels = np.array(range(self.mask_cellnum[j])) + 1
             for i in range(linenum):
                 labels = np.setdiff1d(labels, [matching_table_nway[i][j]])
             label_remain.append(labels)
 
-        for i in range(self.expnum):
+        for i in range(nexp):
             num = len(label_remain[i])
             for j in range(num):
                 cnt = cnt + 1
-                this_record = np.zeros(self.expnum + 1) - 1
+                this_record = np.zeros(nexp + 1) - 1
                 this_record[i] = label_remain[i][j]
-                this_record[self.expnum] = cnt
+                this_record[nexp] = cnt
                 matching_table_nway_new.append(this_record.astype(int))
 
         return matching_table_nway_new
@@ -358,40 +412,44 @@ class NwayMatching(ArgSchemaParser):
     def write_output_json(self, output_json):
         ''' Write the matching result into output json file. '''
 
+        nexp = len(self.experiments)
+
         cellnum = np.shape(self.matching_table_nway)[0]
         matchingdata = dict()
         matchingdata["cell_rois"] = dict()
-        prob = np.zeros(self.expnum)
+        prob = np.zeros(nexp)
 
         for i in range(cellnum):
             matching_exp_num = \
-                    self.expnum - 1 - \
+                    nexp - 1 - \
                     np.count_nonzero(self.matching_table_nway[i] == -1)
             prob[matching_exp_num] = prob[matching_exp_num] + 1
             logger.debug(self.matching_table_nway[i])
 
         for i in range(cellnum):
-            labelstr = str(int(self.matching_table_nway[i][self.expnum]))
-            thisrgn = []
+            labelstr = str(int(self.matching_table_nway[i][nexp]))
+            this_match = [i for i in self.matching_table_nway[i][:-1] if i != -1]
+            matchingdata["cell_rois"][labelstr] = this_match
+            #thisrgn = []
 
-            # Handle unsychronized roi and segmentation mask
-            for j in range(self.expnum):
-                if (
-                    (int(self.matching_table_nway[i][j]) != -1) &
-                    (
-                        int(self.matching_table_nway[i][j]) in
-                        self.dict_label_to_roiid[j].keys())):
-                    thisrgn.append(
-                            self.dict_label_to_roiid[j][
-                                int(self.matching_table_nway[i][j])])
+            ## Handle unsychronized roi and segmentation mask
+            #for j in range(nexp):
+            #    if (
+            #        (int(self.matching_table_nway[i][j]) != -1) &
+            #        (
+            #            int(self.matching_table_nway[i][j]) in
+            #            self.dict_label_to_roiid[j].keys())):
+            #        thisrgn.append(
+            #                self.dict_label_to_roiid[j][
+            #                    int(self.matching_table_nway[i][j])])
 
-            matchingdata["cell_rois"][labelstr] = thisrgn
+            #matchingdata["cell_rois"][labelstr] = thisrgn
 
         matchingdata["transforms"] = []
         for k in self.pair_matches:
             matchingdata["transforms"].append({
-                "moving": k.args['filename_intensity_moving'],
-                "fixed": k.args['filename_intensity_fixed'],
+                "moving": k.args['moving']['ophys_average_intensity_projection_image'],
+                "fixed": k.args['fixed']['ophys_average_intensity_projection_image'],
                 "transform": k.tform.tolist(),
                 "properties": utils.calc_first_order_properties(k.tform)})
 
@@ -401,27 +459,29 @@ class NwayMatching(ArgSchemaParser):
     def write_output_images(self):
         ''' Write matching images. Matched cells are given the same label.'''
 
-        for k in range(self.expnum):
-            outimgfilename = os.path.join(
-                self.args['output_directory'],
-                self.filename_exp_prefix[k] + '_matching.tif')
-            filename_segmask_relabel = os.path.join(
-                self.args['output_directory'],
-                self.filename_exp_prefix[k] + '_maxInt_masks_relabel.tif')
-            segmask_3d = \
-                utils.read_tiff_3d(filename_segmask_relabel)
+        nexp = len(self.experiments)
 
-            matching_mask = np.zeros(segmask_3d.shape)
-            linenum = np.shape(self.matching_table_nway)[0]
+        #for k in range(nexp):
+        #    outimgfilename = os.path.join(
+        #        self.args['output_directory'],
+        #        self.filename_exp_prefix[k] + '_matching.tif')
+        #    filename_segmask_relabel = os.path.join(
+        #        self.args['output_directory'],
+        #        self.filename_exp_prefix[k] + '_maxInt_masks_relabel.tif')
+        #    segmask_3d = \
+        #        utils.read_tiff_3d(filename_segmask_relabel)
 
-            for i in range(linenum):
-                if self.matching_table_nway[i][k] > 0:
-                    matching_mask[
-                            segmask_3d == self.matching_table_nway[i][k]
-                            ] = self.matching_table_nway[i][self.expnum]
+        #    matching_mask = np.zeros(segmask_3d.shape)
+        #    linenum = np.shape(self.matching_table_nway)[0]
 
-            sitk_img = sitk.GetImageFromArray(matching_mask.astype(np.uint16))
-            sitk.WriteImage(sitk_img, outimgfilename)
+        #    for i in range(linenum):
+        #        if self.matching_table_nway[i][k] > 0:
+        #            matching_mask[
+        #                    segmask_3d == self.matching_table_nway[i][k]
+        #                    ] = self.matching_table_nway[i][nexp]
+
+        #    sitk_img = sitk.GetImageFromArray(matching_mask.astype(np.uint16))
+        #    sitk.WriteImage(sitk_img, outimgfilename)
 
     def match_nway(self, para):
         '''Nway cell matching by calling pairwise
@@ -429,31 +489,39 @@ class NwayMatching(ArgSchemaParser):
 
         # pair-wise matching
         self.pair_matches = []
-        for i in range(self.expnum - 1):
+        for fixed, moving in itertools.combinations(self.experiments, 2):
             pair_args = dict(self.args)
-            pair_args['filename_intensity_fixed'] = self.filename_intensity[i]
-            pair_args['filename_segmask_fixed'] = self.filename_segmask[i]
-            pair_args['output_directory'] = self.args['output_directory']
+            pair_args["fixed"] = fixed
+            pair_args["moving"] = moving
+            self.pair_matches.append(
+                    PairwiseMatching(input_data=pair_args, args=[]))
+            self.pair_matches[-1].run()
 
-            for j in range(i + 1, self.expnum):
-                pair_args['filename_intensity_moving'] = \
-                    self.filename_intensity[j]
-                pair_args['filename_segmask_moving'] = \
-                    self.filename_segmask[j]
+        #for i in range(self.expnum - 1):
+        #    pair_args = dict(self.args)
+        #    pair_args['filename_intensity_fixed'] = self.filename_intensity[i]
+        #    pair_args['filename_segmask_fixed'] = self.filename_segmask[i]
+        #    pair_args['output_directory'] = self.args['output_directory']
 
-                self.pair_matches.append(
-                        PairwiseMatching(input_data=pair_args, args=[]))
-                self.pair_matches[-1].run()
+        #    for j in range(i + 1, self.expnum):
+        #        pair_args['filename_intensity_moving'] = \
+        #            self.filename_intensity[j]
+        #        pair_args['filename_segmask_moving'] = \
+        #            self.filename_segmask[j]
+
+        #        self.pair_matches.append(
+        #                PairwiseMatching(input_data=pair_args, args=[]))
+        #        self.pair_matches[-1].run()
 
         # generate label id to roi id dictionary
         self.dict_label_to_roiid = []
-        self.mask_cellnum = np.zeros(self.expnum, dtype=np.int)
-        for i in range(self.expnum):
-            this_dict_label_to_roiid, self.mask_cellnum[i] = \
-                    self.gen_label_roi_dict(
-                            self.filename_exp_prefix[i], para['input_json'])
-            self.dict_label_to_roiid = np.append(
-                    self.dict_label_to_roiid, this_dict_label_to_roiid)
+        self.mask_cellnum = np.zeros(len(self.experiments), dtype=np.int)
+        #for i in range(len(self.experiments)):
+        #    this_dict_label_to_roiid, self.mask_cellnum[i] = \
+        #            self.gen_label_roi_dict(
+        #                    self.filename_exp_prefix[i], para['input_json'])
+        #    self.dict_label_to_roiid = np.append(
+        #            self.dict_label_to_roiid, this_dict_label_to_roiid)
 
         # generate N-way matching table
         matching_table_nway_tmp = self.gen_nway_table_with_redundancy()
