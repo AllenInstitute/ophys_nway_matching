@@ -9,9 +9,8 @@ import os
 import logging
 import subprocess
 import numpy as np
+import json
 from PIL import Image as im
-from skimage import measure as ms
-import matplotlib.pyplot as plt
 import SimpleITK as sitk
 import cv2
 import scipy.spatial
@@ -24,8 +23,6 @@ import nway.utils as utils
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
-
-plt.ion()
 
 
 def gen_assignment_pairs(cost_matrix, cpp_executable=None):
@@ -94,7 +91,7 @@ def save_matching_table(table, output_directory, basename):
             fmt="%d %d %7.4e %7.4e %7.4e")
 
 
-def region_properties(mask):
+def region_properties(mask, mdict):
     """Characterize each label region in a mask
 
     Parameters
@@ -131,7 +128,7 @@ def region_properties(mask):
     return prop
 
 
-def calculate_distance_and_iou(mask1, mask2):
+def calculate_distance_and_iou(mask1, mask2, dict1, dict2):
     """Compute distance and intersection-over-union
     for the labels in two masks
 
@@ -154,8 +151,8 @@ def calculate_distance_and_iou(mask1, mask2):
         intersection-over-union pixel area ratios
 
     """
-    prop1 = region_properties(mask1)
-    prop2 = region_properties(mask2)
+    prop1 = region_properties(mask1, dict1)
+    prop2 = region_properties(mask2, dict2)
 
     # pair-wise distances between cell centers
     distance = scipy.spatial.distance.cdist(
@@ -196,10 +193,10 @@ def calculate_cost_matrix(distance, iou, maximum_distance):
     return cost_matrix
 
 
-def cell_matching(labels1, labels2, max_dist, munkres_exe):
+def cell_matching(mask1, mask2, dict1, dict2, max_dist, munkres_exe):
     ''' Function that matches cells. '''
 
-    distance, iou = calculate_distance_and_iou(labels1, labels2)
+    distance, iou = calculate_distance_and_iou(mask1, mask2, dict1, dict2)
 
     cost_matrix = calculate_cost_matrix(distance, iou, max_dist)
 
@@ -297,42 +294,6 @@ def register_intensity_images(
     return tform, img_moving_warped
 
 
-def imshow3d(img3d, display_row_num, display_col_num):
-    '''Display 3d images.'''
-
-    dep = np.shape(img3d)[0]
-    if display_row_num * display_col_num < dep:
-        logger.error("The number of row to display times the "
-                     "number of columns is less than the depth "
-                     "of the image. Fail to display.")
-        return
-
-    figs = plt.figure()
-
-    str_row = str(display_row_num)
-    str_col = str(display_col_num)
-
-    for i in range(dep):
-        id_panel = str_row + str_col + str(i + 1)
-        figs.add_subplot(id_panel)
-        plt.imshow(img3d[i, :, :])
-
-
-def relabel(maskimg_3d):
-    ''' Relabel mask image to make labels continous and unique'''
-
-    num_images = np.shape(maskimg_3d)[0]
-    labeloffset = 0
-
-    for k in range(0, num_images):
-        labelimg = ms.label((maskimg_3d[k, :, :] > 0))
-        labelimg[labelimg > 0] = labelimg[labelimg > 0] + labeloffset
-        maskimg_3d[k, :, :] = labelimg
-        labeloffset = np.amax(labelimg)
-
-    return maskimg_3d
-
-
 class PairwiseMatching(ArgSchemaParser):
     default_schema = PairwiseMatchingSchema
     ''' Class for pairwise ophys matching.
@@ -365,29 +326,10 @@ class PairwiseMatching(ArgSchemaParser):
                 'register_%s_to_%s.tif' % (moving_strid, fixed_strid),
                 self.args['motionType'])
 
-        # relabel the masks and write to disk
-        segmask_fixed_3d = relabel(
-                utils.read_tiff_3d(self.args['fixed']['max_int_mask_image']))
-        segmask_moving_3d = relabel(
-                utils.read_tiff_3d(self.args['moving']['max_int_mask_image']))
-
-        filename_segmask_fixed_relabel = os.path.join(
-            self.args['output_directory'],
-            fixed_strid +
-            '_maxInt_masks_relabel.tif').encode('utf-8')
-
-        sitk_segmask_fixed = sitk.GetImageFromArray(
-            segmask_fixed_3d.astype(np.uint16))
-        sitk.WriteImage(sitk_segmask_fixed, filename_segmask_fixed_relabel)
-
-        filename_segmask_moving_relabel = os.path.join(
-            self.args['output_directory'],
-            moving_strid +
-            '_maxInt_masks_relabel.tif').encode('utf-8')
-
-        sitk_segmask_moving = sitk.GetImageFromArray(
-            segmask_moving_3d.astype(np.uint16))
-        sitk.WriteImage(sitk_segmask_moving, filename_segmask_moving_relabel)
+        segmask_fixed_3d = utils.read_tiff_3d(
+                self.args['fixed']['nice_mask_path'])
+        segmask_moving_3d = utils.read_tiff_3d(
+                self.args['moving']['nice_mask_path'])
 
         # transform moving segmentation masks
         # compute self.segmask_moving_3d_registered
@@ -396,10 +338,17 @@ class PairwiseMatching(ArgSchemaParser):
                 segmask_fixed_3d.shape[1:],
                 self.tform)
 
+        with open(self.args['fixed']['nice_dict_path'], 'r') as f:
+            fixed_dict = json.load(f)
+        with open(self.args['moving']['nice_dict_path'], 'r') as f:
+            moving_dict = json.load(f)
+
         # matching cells
         self.matching_table, self.cost_matrix = cell_matching(
                     segmask_fixed_3d,
                     segmask_moving_3d_registered,
+                    fixed_dict,
+                    moving_dict,
                     self.args['maximum_distance'],
                     self.args['munkres_executable'])
 

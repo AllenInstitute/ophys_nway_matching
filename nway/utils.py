@@ -1,5 +1,69 @@
 import SimpleITK as sitk
 import numpy as np
+from skimage import measure as ms
+
+
+def relabel(maskimg_3d):
+    ''' Relabel mask image to make labels continous and unique'''
+
+    remask = np.copy(maskimg_3d)
+
+    num_images = np.shape(remask)[0]
+    labeloffset = 0
+
+    for k in range(0, num_images):
+        labelimg = ms.label((remask[k, :, :] > 0))
+        labelimg[labelimg > 0] = labelimg[labelimg > 0] + labeloffset
+        remask[k, :, :] = labelimg
+        labeloffset = np.amax(labelimg)
+
+    return remask
+
+
+def row_col_from_roi(roi):
+    x0 = roi["x"]
+    y0 = roi["y"]
+    w = roi["width"]
+    h = roi["height"]
+    coord = np.mgrid[y0:(y0 + h):1, x0:(x0 + w):1]
+    mask = np.array(roi['mask_matrix'])
+    masked = np.array([coord[i][mask]
+                       for i in range(coord.shape[0])]).reshape(2, -1).T
+    return masked
+
+
+def labeled_mask_from_experiment(exp):
+    im = sitk.GetImageFromArray(
+            read_tiff_3d(
+                exp['ophys_average_intensity_projection_image']))
+    imsz = im.GetSize()
+    zs = np.unique([r['z'] for r in exp['cell_rois']])
+    mask = np.zeros((zs.size, imsz[1], imsz[0])).astype('uint32')
+    for roi in exp['cell_rois']:
+        rc = row_col_from_roi(roi)
+        mask[roi['z'], rc[:, 0], rc[:, 1]] = roi['id']
+
+    # this should work!!
+    # it does not
+    # x = np.unique(mask)
+    # relabeled = np.zeros_like(mask).astype('uint16')
+    # rdict = {}
+    # for i, ix in enumerate(x):
+    #     ind = np.nonzero(mask == ix)
+    #     relabeled[ind] = i
+    #     rdict[str(i)] = int(ix)
+
+    # this does, but it means the code
+    # depends on a certain labeling order
+    relabeled = relabel(mask)
+    rdict = {}
+    for k in np.unique(relabeled)[1:]:
+        ind = np.nonzero(relabeled == k)
+        mi = mask[ind].flatten()
+        assert np.unique(mi).size == 1
+        rdict[str(k)] = int(mi[0])
+
+    return relabeled, rdict
 
 
 def calc_first_order_properties(M, force_shear='x'):

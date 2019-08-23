@@ -2,7 +2,7 @@ from argschema.schemas import DefaultSchema
 from argschema import ArgSchema
 from argschema.fields import (
         Boolean, Int, Str, Float, Dict,
-        InputFile, OutputDir, Nested)
+        List, InputFile, OutputDir, Nested)
 import marshmallow as mm
 
 
@@ -74,9 +74,16 @@ class ExperimentSchema(DefaultSchema):
     max_int_mask_image = InputFile(
         required=True,
         description="mask image")
-    cell_rois = Dict(
+    cell_rois = List(
+        Dict,
         required=True,
         description='dict mapping of ids, labels, zs,')
+    nice_mask_path = InputFile(
+        required=True,
+        description="path to mask tiff with unique labels")
+    nice_dict_path = InputFile(
+        required=True,
+        description="path to dict for mask labels to LIMS ids")
 
 
 class PairwiseMatchingSchema(NwayMatchingSchema):
