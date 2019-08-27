@@ -1,6 +1,16 @@
 import SimpleITK as sitk
 import numpy as np
 from skimage import measure as ms
+import time
+# import pandas as pd
+# 
+# 
+# def frame_from_array(a, rows, columns):
+#     df = pd.DataFrame(
+#         a,
+#         columns=columns,
+#         index=rows)
+#     return df
 
 
 def relabel(maskimg_3d):
@@ -32,7 +42,7 @@ def row_col_from_roi(roi):
     return masked
 
 
-def labeled_mask_from_experiment(exp):
+def labeled_mask_from_experiment(exp, legacy=True):
     im = sitk.GetImageFromArray(
             read_tiff_3d(
                 exp['ophys_average_intensity_projection_image']))
@@ -43,25 +53,26 @@ def labeled_mask_from_experiment(exp):
         rc = row_col_from_roi(roi)
         mask[roi['z'], rc[:, 0], rc[:, 1]] = roi['id']
 
-    # this should work!!
-    # it does not
-    # x = np.unique(mask)
-    # relabeled = np.zeros_like(mask).astype('uint16')
-    # rdict = {}
-    # for i, ix in enumerate(x):
-    #     ind = np.nonzero(mask == ix)
-    #     relabeled[ind] = i
-    #     rdict[str(i)] = int(ix)
-
-    # this does, but it means the code
-    # depends on a certain labeling order
-    relabeled = relabel(mask)
+    x = np.unique(mask)
+    relabeled = np.zeros_like(mask).astype('uint16')
     rdict = {}
-    for k in np.unique(relabeled)[1:]:
-        ind = np.nonzero(relabeled == k)
-        mi = mask[ind].flatten()
-        assert np.unique(mi).size == 1
-        rdict[str(k)] = int(mi[0])
+    for i, ix in enumerate(x):
+        ind = np.nonzero(mask == ix)
+        relabeled[ind] = i
+        rdict[str(i)] = int(ix)
+
+    # NOTE: above labeling should work on its own
+    # but, some legacy order-dependence with the
+    # Hungarian method requires the following ordering
+    # Hungarian method is not recommended
+    if legacy:
+        relabeled = relabel(relabeled)
+        rdict = {}
+        for k in np.unique(relabeled)[1:]:
+            ind = np.nonzero(relabeled == k)
+            mi = mask[ind].flatten()
+            assert np.unique(mi).size == 1
+            rdict[str(k)] = int(mi[0])
 
     return relabeled, rdict
 

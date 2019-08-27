@@ -62,6 +62,15 @@ class NwayMatchingSchema(ArgSchema):
             ]),
         description=("motion model passed to cv2.findTransformECC"
                      "during image registration step."))
+    legacy_ordering = Boolean(
+        required=False,
+        default=True,
+        missing=True,
+        description=("maintain legacy ordering from skimage.measure.label. "
+                     "This is only important when trying to reproduce past "
+                     "results exactly with the Hungarian method "
+                     "(not recommended). Defaults to legacy order. Switch is"
+                     "here for demonstration/experimentation."))
 
 
 class ExperimentSchema(DefaultSchema):

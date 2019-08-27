@@ -25,12 +25,13 @@ logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
 
-def create_nice_mask(experiment, output_directory):
+def create_nice_mask(experiment, output_directory, legacy=True):
     '''Generate label to roi id mapping dictionary. ROIs are coded in input json.
        Labels are coded in segmented cell mask images.
     '''
 
-    nice_mask, mask_dict = utils.labeled_mask_from_experiment(experiment)
+    nice_mask, mask_dict = utils.labeled_mask_from_experiment(
+            experiment, legacy=legacy)
 
     mask_path = os.path.join(
             output_directory,
@@ -73,7 +74,10 @@ class NwayMatching(ArgSchemaParser):
         self.experiments = []
         for exp in data['experiment_containers']['ophys_experiments']:
             self.experiments.append(
-                    create_nice_mask(exp, self.args['output_directory']))
+                    create_nice_mask(
+                        exp,
+                        self.args['output_directory'],
+                        legacy=self.args['legacy_ordering']))
 
         self.expnum = len(self.experiments)
 

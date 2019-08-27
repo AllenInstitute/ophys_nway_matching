@@ -117,10 +117,12 @@ def region_properties(mask, mdict):
     n = mask.max()
     prop['centers'] = np.zeros((n, 2))
     prop['pixels'] = [[]] * n
+    prop['labels'] = [[]] * n
     for i in np.arange(n):
         label_locs = np.argwhere(mask == i + 1)
+        prop['labels'][i] = mdict[str(i + 1)]
         if len(label_locs) > 0:
-            # the rounding/int-cast here should not be here
+            # NOTE: the rounding/int-cast here should not be here
             # leaving it in place for now to preserve legacy
             prop['centers'][i] = np.round(
                     label_locs.mean(axis=0)).astype('int')[[-1, -2]]
@@ -351,6 +353,11 @@ class PairwiseMatching(ArgSchemaParser):
                     moving_dict,
                     self.args['maximum_distance'],
                     self.args['munkres_executable'])
+
+        cname = os.path.join(
+                self.args['output_directory'],
+                moving_strid + '_to_' + fixed_strid + '_cost.npy')
+        np.save(cname, self.cost_matrix)
 
         if self.args['save_pairwise_tables']:
             save_matching_table(
