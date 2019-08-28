@@ -2,15 +2,15 @@ import SimpleITK as sitk
 import numpy as np
 from skimage import measure as ms
 import time
-# import pandas as pd
-# 
-# 
-# def frame_from_array(a, rows, columns):
-#     df = pd.DataFrame(
-#         a,
-#         columns=columns,
-#         index=rows)
-#     return df
+import pandas as pd
+
+
+def frame_from_array(a, rows, columns):
+    df = pd.DataFrame(
+        a,
+        columns=columns,
+        index=rows)
+    return df
 
 
 def relabel(maskimg_3d):

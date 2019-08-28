@@ -178,20 +178,35 @@ class NwayMatching(ArgSchemaParser):
 
             score[i] = 0
             cnt = 0
+            ecnt = 0
 
             for j in range(self.expnum - 1):
                 for k in range(j + 1, self.expnum):
-                    [cellnum1, cellnum2] = \
-                            self.pair_matches[cnt].cost_matrix.shape
-                    if (
-                            (matching_table_nway[i][j]-1 < cellnum1) and
-                            (matching_table_nway[i][k]-1 < cellnum2)):
-                        score[i] = \
-                                score[i] + \
-                                self.pair_matches[cnt].cost_matrix[
-                                        matching_table_nway[i][j] - 1][
-                                                matching_table_nway[i][k] - 1]
-                        cnt = cnt + 1
+                    #[cellnum1, cellnum2] = \
+                    #        self.pair_matches[cnt].cost_matrix.shape
+                    #if (
+                    #        (matching_table_nway[i][j]-1 < cellnum1) and
+                    #        (matching_table_nway[i][k]-1 < cellnum2)):
+                    cols = self.pair_matches[ecnt].cost_matrix.columns.tolist()
+                    rows = self.pair_matches[ecnt].cost_matrix.index.tolist()
+                    col = matching_table_nway[i][k]
+                    # NOTE: this doesn't make sense!
+                    # but it preserves past results
+                    if col == -1:
+                        col = cols[-2]
+                    row = matching_table_nway[i][j]
+                    if row == -1:
+                        row = rows[-2]
+                    score[i] = \
+                            score[i] + \
+                            self.pair_matches[ecnt].cost_matrix[col][row]
+                                    #matching_table_nway[i][j] - 1][
+                                    #        matching_table_nway[i][k] - 1]
+                            #self.pair_matches[cnt].cost_matrix[
+                            #        matching_table_nway[i][j] - 1][
+                            #                matching_table_nway[i][k] - 1]
+                    cnt = cnt + 1
+                    ecnt += 1
             score[i] = score[i]/cnt
 
         # if two records share common elements in the
@@ -202,7 +217,6 @@ class NwayMatching(ArgSchemaParser):
         for i in range(linenum - 1):  # start from the second line
             for j in range(i + 1, linenum):
                 for k in range(self.expnum):
-
                     if (
                            (matching_table_nway[j][k] ==
                                matching_table_nway[i][k]) and
@@ -210,15 +224,12 @@ class NwayMatching(ArgSchemaParser):
                            (matching_table_nway[j][k] != -1)):
                         edge[i, j] = 1
                         break
-
         labelval = 0
 
         for i in range(linenum):
-
             if node_exist[i] == 1:
                 idx = np.argwhere(edge[i, :] == 1)
                 len_idx = len(idx)
-
                 if len_idx == 0:  # no conflict with other matching
                     labelval = labelval + 1
                     this_record = np.append(matching_table_nway[i], labelval)
@@ -252,8 +263,9 @@ class NwayMatching(ArgSchemaParser):
         label_remain = []
 
         for j in range(self.expnum):
-            nj = len(self.experiments[j]['cell_rois'])
-            labels = np.array(range(nj)) + 1
+            labels = [v['id'] for v in self.experiments[j]['cell_rois']]
+            #nj = len(self.experiments[j]['cell_rois'])
+            #labels = np.array(range(nj)) + 1
             for i in range(linenum):
                 labels = np.setdiff1d(labels, [matching_table_nway[i][j]])
             label_remain.append(labels)
@@ -298,15 +310,16 @@ class NwayMatching(ArgSchemaParser):
 
         for i in range(cellnum):
             labelstr = str(int(self.matching_table_nway[i][self.expnum]))
-            thisrgn = []
+            # thisrgn = []
 
-            # Handle unsychronized roi and segmentation mask
-            for j in range(self.expnum):
-                with open(self.experiments[j]['nice_dict_path'], 'r') as f:
-                    mdict = json.load(f)
-                entry = str(int(self.matching_table_nway[i][j]))
-                if entry in mdict:
-                    thisrgn.append(mdict[entry])
+            # # Handle unsychronized roi and segmentation mask
+            # for j in range(self.expnum):
+            #     with open(self.experiments[j]['nice_dict_path'], 'r') as f:
+            #         mdict = json.load(f)
+            #     entry = str(int(self.matching_table_nway[i][j]))
+            #     if entry in mdict:
+            #         thisrgn.append(mdict[entry])
+            thisrgn = [v for v in self.matching_table_nway[i][:-1] if v != -1]
 
             matchingdata["cell_rois"][labelstr] = thisrgn
 

@@ -28,16 +28,18 @@ logger.setLevel(logging.INFO)
 def gen_assignment_pairs(cost_matrix, cpp_executable=None):
     '''Generate self.matching_table using bipartite graph matching.'''
 
+    cost_matrix_array = np.array(cost_matrix)
+
     if cpp_executable:
         # C++
         infile = tempfile.NamedTemporaryFile(delete=False).name
         outfile = tempfile.NamedTemporaryFile(delete=False).name
-        np.savetxt(infile, cost_matrix, delimiter=' ')
+        np.savetxt(infile, cost_matrix_array, delimiter=' ')
         cpp_args = [
                 cpp_executable,
                 infile,
-                str(cost_matrix.shape[0]),
-                str(cost_matrix.shape[1]),
+                str(cost_matrix_array.shape[0]),
+                str(cost_matrix_array.shape[1]),
                 outfile]
         subprocess.check_call(cpp_args)
         assigned_pairs = np.loadtxt(
@@ -49,11 +51,13 @@ def gen_assignment_pairs(cost_matrix, cpp_executable=None):
         assigned_pairs = np.transpose(
                 np.array(
                     scipy.optimize.linear_sum_assignment(
-                        cost_matrix)))
+                        cost_matrix_array)))
 
-    mdict = {ix[0]: ix[1] for ix in assigned_pairs}
+    row_lab = cost_matrix.index.tolist()
+    col_lab = cost_matrix.columns.tolist()
+    pairlabels = [[row_lab[pair[0]], col_lab[pair[1]]] for pair in assigned_pairs]
 
-    return mdict
+    return pairlabels
 
 
 def gen_matching_table(
@@ -63,22 +67,37 @@ def gen_matching_table(
     num_matched = 0
     matching_table = []
     jmatched = []
-    for i in range(distance.shape[0]):
-        matching_table.append([i + 1, -1, -1, -1, -1])
-        if i in assigned_pairs:
-            j = assigned_pairs[i]
-            if distance[i, j] < max_distance:
-                matching_table[-1] = ([
-                    i + 1,
-                    j + 1,
-                    distance[i, j],
-                    iou[i, j],
-                    cost_matrix[i, j]])
-                num_matched = num_matched + 1
-                jmatched.append(j)
-    for j in range(distance.shape[1]):
+    for ap in assigned_pairs:
+        if distance[ap[1]][ap[0]] < max_distance:
+            matching_table.append([
+                ap[0],
+                ap[1],
+                distance[ap[1]][ap[0]],
+                iou[ap[1]][ap[0]],
+                cost_matrix[ap[1]][ap[0]]])
+            jmatched.append(ap[1])
+        else:
+            matching_table.append([ap[0], -1, -1, -1, -1])
+    for j in cost_matrix.columns.tolist():
         if j not in jmatched:
-            matching_table.append([-1, j + 1, -1, -1, -1])
+            matching_table.append([-1, ap[1], -1, -1, -1])
+
+    #for i in range(distance.shape[0]):
+    #    matching_table.append([i + 1, -1, -1, -1, -1])
+    #    if i in assigned_pairs:
+    #        j = assigned_pairs[i]
+    #        if distance[i, j] < max_distance:
+    #            matching_table[-1] = ([
+    #                i + 1,
+    #                j + 1,
+    #                distance[i, j],
+    #                iou[i, j],
+    #                cost_matrix[i, j]])
+    #            num_matched = num_matched + 1
+    #            jmatched.append(j)
+    #for j in range(distance.shape[1]):
+    #    if j not in jmatched:
+    #        matching_table.append([-1, j + 1, -1, -1, -1])
 
     return np.array(matching_table)
 
@@ -167,6 +186,11 @@ def calculate_distance_and_iou(mask1, mask2, dict1, dict2):
             iou[i, j] = \
                     len(ipix.intersection(jpix)) / len(ipix.union(jpix))
 
+    distance = utils.frame_from_array(
+        distance, prop1['labels'], prop2['labels'])
+    iou = utils.frame_from_array(
+        iou, prop1['labels'], prop2['labels'])
+
     return distance, iou
 
 
@@ -189,9 +213,11 @@ def calculate_cost_matrix(distance, iou, maximum_distance):
         N x M calculated cost matrix
 
     """
-    norm_dist = distance / maximum_distance
+    norm_dist = np.array(distance) / maximum_distance
     norm_dist[norm_dist > 1] = 999.0
-    cost_matrix = norm_dist + (1.0 - iou)
+    cost_matrix = norm_dist + (1.0 - np.array(iou))
+    cost_matrix = utils.frame_from_array(
+            cost_matrix, distance.index.tolist(), distance.columns.tolist())
     return cost_matrix
 
 
