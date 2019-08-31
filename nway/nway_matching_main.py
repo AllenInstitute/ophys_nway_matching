@@ -16,8 +16,9 @@ import SimpleITK as sitk
 import os
 import json
 import itertools
+import pandas as pd
 from nway.pairwise_matching import PairwiseMatching
-from nway.schemas import NwayMatchingSchema
+from nway.schemas import NwayMatchingSchema, NwayMatchingOutputSchema
 import nway.utils as utils
 from argschema import ArgSchemaParser
 
@@ -46,9 +47,14 @@ def create_nice_mask(experiment, output_directory, legacy=True):
     dict_path = os.path.join(
             output_directory,
             "%d_nice_dict.json" % experiment['id'])
+    full_dict = {
+            'experiment': experiment['id'],
+            'mask_path': mask_path,
+            'mask_dict': mask_dict
+            }
 
     with open(dict_path, 'w') as f:
-        json.dump(mask_dict, f, indent=2)
+        json.dump(full_dict, f, indent=2)
 
     experiment['nice_dict_path'] = dict_path
 
@@ -57,6 +63,7 @@ def create_nice_mask(experiment, output_directory, legacy=True):
 
 class NwayMatching(ArgSchemaParser):
     default_schema = NwayMatchingSchema
+    default_output_schema = NwayMatchingOutputSchema
     ''' Class for matching cells across arbitrary number of ophys sessions.
 
         Necessary files are obtained by parsing input json. Final Nway matching
@@ -91,30 +98,31 @@ class NwayMatching(ArgSchemaParser):
            scanning every matching pair in all pairwise matching results.
         '''
 
-        matching_table_nway = []
-        # counter for each pair-wise matching,
-        # maximum value is C(N,2), N means Nway
-        cnt = 0
+        matching_frame = pd.DataFrame(
+            columns=[e['id'] for e in self.experiments])
 
-        for i in range(self.expnum - 1):
-            for j in range(i + 1, self.expnum):
-                for line in self.pair_matches[cnt].matching_table:
-                    if (line[0] != -1) & (line[1] != -1):
-                        this_record = np.zeros(self.expnum, dtype='int') - 1
-                        this_record[i] = line[0]
-                        this_record[j] = line[1]
-                        matching_table_nway.append(this_record)
-                cnt += 1
+        for pair in self.pair_matches:
+            with open(pair.args['output_json'], 'r') as f:
+                pairj = json.load(f)
+            pairframe = pd.DataFrame(
+                    [[i['fixed'], i['moving']] for i in pairj['matches']],
+                    columns = [
+                        pairj['fixed_experiment'],
+                        pairj['moving_experiment']])
+            matching_frame = matching_frame.append(pairframe)
 
-        return matching_table_nway
+        return matching_frame
 
     @staticmethod
-    def remove_nway_table_redundancy(table):
+    def remove_nway_table_redundancy(frame):
         '''Remove redundancy from the matching table. Redundancy include lines
            that are the same or one is the subset of another.
         '''
-        # but, it does not, so, I preserve the original logic for now
-        # matching_table_nway = np.copy(matching_table_nway_ori)
+
+        table = np.array(frame).astype('float')
+        table[np.isnan(table)] = -1
+        table = table.astype('int')
+
         linenum, expnum = np.shape(table)
         stoptag = 0
 
@@ -197,6 +205,11 @@ class NwayMatching(ArgSchemaParser):
                     row = matching_table_nway[i][j]
                     if row == -1:
                         row = rows[-2]
+                    #print(
+                    #        self.pair_matches[ecnt].args['fixed']['id'],
+                    #        self.pair_matches[ecnt].args['moving']['id'],
+                    #        row,
+                    #        col)
                     score[i] = \
                             score[i] + \
                             self.pair_matches[ecnt].cost_matrix[col][row]
@@ -293,12 +306,12 @@ class NwayMatching(ArgSchemaParser):
                 delimiter=' ',
                 fmt='%d')
 
-    def write_output_json(self, output_json):
+    def create_output_json(self):
         ''' Write the matching result into output json file. '''
 
         cellnum = np.shape(self.matching_table_nway)[0]
         matchingdata = dict()
-        matchingdata["cell_rois"] = dict()
+        matchingdata["nway_matches"] = []
         prob = np.zeros(self.expnum)
 
         for i in range(cellnum):
@@ -310,31 +323,24 @@ class NwayMatching(ArgSchemaParser):
 
         for i in range(cellnum):
             labelstr = str(int(self.matching_table_nway[i][self.expnum]))
-            # thisrgn = []
-
-            # # Handle unsychronized roi and segmentation mask
-            # for j in range(self.expnum):
-            #     with open(self.experiments[j]['nice_dict_path'], 'r') as f:
-            #         mdict = json.load(f)
-            #     entry = str(int(self.matching_table_nway[i][j]))
-            #     if entry in mdict:
-            #         thisrgn.append(mdict[entry])
             thisrgn = [v for v in self.matching_table_nway[i][:-1] if v != -1]
 
-            matchingdata["cell_rois"][labelstr] = thisrgn
+            if len(thisrgn) > 0:
+                matchingdata["nway_matches"].append(thisrgn)
+                #matchingdata["cell_rois"][labelstr] = thisrgn
 
-        matchingdata["transforms"] = []
+        matchingdata["pairwise_results"] = []
         for k in self.pair_matches:
-            matchingdata["transforms"].append({
-                "moving": k.args['moving'][
-                    'ophys_average_intensity_projection_image'],
-                "fixed": k.args['fixed'][
-                    'ophys_average_intensity_projection_image'],
-                "transform": k.tform.tolist(),
-                "properties": utils.calc_first_order_properties(k.tform)})
+            with open(k.args['output_json'], 'r') as f:
+                j = json.load(f)
+            matchingdata['pairwise_results'].append(j)
+            if not self.args['save_pairwise_results']:
+                os.remove(k.args['output_json'])
 
-        with open(output_json, 'w') as myfile:
-            json.dump(matchingdata, myfile, sort_keys=True, indent=4)
+        return matchingdata
+
+        #with open(output_json, 'w') as myfile:
+        #    json.dump(matchingdata, myfile, sort_keys=True, indent=4)
 
     def match_nway(self, para):
         '''Nway cell matching by calling pairwise
@@ -346,15 +352,17 @@ class NwayMatching(ArgSchemaParser):
             pair_args = dict(self.args)
             pair_args["fixed"] = fixed
             pair_args["moving"] = moving
+            pair_args["output_json"] = os.path.join(
+                    self.args["output_directory"],
+                    "{}_to_{}_output.json".format(moving['id'], fixed['id']))
             self.pair_matches.append(
                     PairwiseMatching(input_data=pair_args, args=[]))
             self.pair_matches[-1].run()
 
         # generate N-way matching table
-        matching_table_nway_tmp = self.gen_nway_table_with_redundancy()
+        matching_frame = self.gen_nway_table_with_redundancy()
 
-        matching_table_nway_tmp = self.remove_nway_table_redundancy(
-                matching_table_nway_tmp)
+        matching_table_nway_tmp = self.remove_nway_table_redundancy(matching_frame)
 
         matching_table_nway_tmp = self.prune_matching_graph(
                 matching_table_nway_tmp)
@@ -380,8 +388,8 @@ class NwayMatching(ArgSchemaParser):
         self.write_matching_table()
         logger.info("Matching table is written!")
 
-        self.write_output_json(self.args['output_json'])
-        logger.info("Output json is generated!")
+        output_json = self.create_output_json()
+        self.output(output_json, indent=2)
 
 
 if __name__ == "__main__":

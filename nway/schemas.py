@@ -13,11 +13,10 @@ class NwayMatchingSchema(ArgSchema):
         required=False,
         default=True,
         description='Whether to save registered image.')
-    save_pairwise_tables = Boolean(
+    save_pairwise_results = Boolean(
         required=False,
         default=False,
-        description=("Whether to save matching tables from "
-                     "pairwise matching"))
+        description=("Whether to save pairwise output jsons"))
     maximum_distance = Int(
         required=False,
         default=10,
@@ -95,9 +94,39 @@ class ExperimentSchema(DefaultSchema):
         description="path to dict for mask labels to LIMS ids")
 
 
+
 class PairwiseMatchingSchema(NwayMatchingSchema):
     output_directory = OutputDir(
         required=True,
         description="destination for output files")
     fixed = Nested(ExperimentSchema)
     moving = Nested(ExperimentSchema)
+
+
+class PairwiseOutputSchema(DefaultSchema):
+    fixed_experiment = Int(
+        required=True,
+        description="fixed experiment id of pair")
+    moving_experiment = Int(
+        required=True,
+        description="moving experiment id of pair")
+    transform = Dict(
+        required=True,
+        description="transform applied to moving")
+    matches = List(
+        Dict,
+        required=True,
+        description="matches made from pairwise matching")
+
+
+class NwayMatchingOutputSchema(DefaultSchema):
+    nway_matches = List(
+        List(Int),
+        required=True,
+        description="list of lists of matching IDs")
+    pairwise_results = List(
+        Dict,
+        required=True,
+        description="list of pairwise result dicts")
+
+

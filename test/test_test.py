@@ -65,15 +65,15 @@ def test_against_old_results(input_file, exe):
 
     old_in_new = np.zeros(len(j1['cell_rois']))
     for i, old in enumerate(j1['cell_rois'].values()):
-        for new in j2['cell_rois'].values():
+        for new in j2['nway_matches']:
             if set(old) == set(new):
                 old_in_new[i] += 1
 
-    new_in_old = np.zeros(len(j2['cell_rois']))
-    for i, new in enumerate(j2['cell_rois'].values()):
+    new_in_old = np.zeros(len(j2['nway_matches']))
+    for i, new in enumerate(j2['nway_matches']):
         for old in j1['cell_rois'].values():
             if set(old) == set(new):
                 new_in_old[i] += 1
 
     assert np.count_nonzero(old_in_new == 1) == len(j1['cell_rois'])
-    assert np.count_nonzero(new_in_old == 1) == len(j2['cell_rois'])
+    assert np.count_nonzero(new_in_old == 1) == len(j2['nway_matches'])

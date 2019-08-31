@@ -18,7 +18,7 @@ import scipy.optimize
 from argschema import ArgSchemaParser
 import tempfile
 
-from nway.schemas import PairwiseMatchingSchema
+from nway.schemas import PairwiseMatchingSchema, PairwiseOutputSchema
 import nway.utils as utils
 
 logger = logging.getLogger(__name__)
@@ -64,42 +64,36 @@ def gen_matching_table(
         cost_matrix, assigned_pairs, distance, iou, max_distance):
     '''Generate self.matching_table using bipartite graph matching.'''
 
-    num_matched = 0
-    matching_table = []
-    jmatched = []
+    jmatch = []
     for ap in assigned_pairs:
         if distance[ap[1]][ap[0]] < max_distance:
-            matching_table.append([
-                ap[0],
-                ap[1],
-                distance[ap[1]][ap[0]],
-                iou[ap[1]][ap[0]],
-                cost_matrix[ap[1]][ap[0]]])
-            jmatched.append(ap[1])
-        else:
-            matching_table.append([ap[0], -1, -1, -1, -1])
-    for j in cost_matrix.columns.tolist():
-        if j not in jmatched:
-            matching_table.append([-1, ap[1], -1, -1, -1])
+            jmatch.append({
+                "fixed" : ap[0],
+                "moving": ap[1],
+                'distance': distance[ap[1]][ap[0]],
+                'iou': iou[ap[1]][ap[0]],
+                'cost': cost_matrix[ap[1]][ap[0]]
+                })
 
-    #for i in range(distance.shape[0]):
-    #    matching_table.append([i + 1, -1, -1, -1, -1])
-    #    if i in assigned_pairs:
-    #        j = assigned_pairs[i]
-    #        if distance[i, j] < max_distance:
-    #            matching_table[-1] = ([
-    #                i + 1,
-    #                j + 1,
-    #                distance[i, j],
-    #                iou[i, j],
-    #                cost_matrix[i, j]])
-    #            num_matched = num_matched + 1
-    #            jmatched.append(j)
-    #for j in range(distance.shape[1]):
+    #num_matched = 0
+    #matching_table = []
+    #jmatched = []
+    #for ap in assigned_pairs:
+    #    if distance[ap[1]][ap[0]] < max_distance:
+    #        matching_table.append([
+    #            ap[0],
+    #            ap[1],
+    #            distance[ap[1]][ap[0]],
+    #            iou[ap[1]][ap[0]],
+    #            cost_matrix[ap[1]][ap[0]]])
+    #        jmatched.append(ap[1])
+    #    else:
+    #        matching_table.append([ap[0], -1, -1, -1, -1])
+    #for j in cost_matrix.columns.tolist():
     #    if j not in jmatched:
-    #        matching_table.append([-1, j + 1, -1, -1, -1])
+    #        matching_table.append([-1, ap[1], -1, -1, -1])
 
-    return np.array(matching_table)
+    return jmatch
 
 
 def save_matching_table(table, output_directory, basename):
@@ -139,13 +133,23 @@ def region_properties(mask, mdict):
     prop['labels'] = [[]] * n
     for i in np.arange(n):
         label_locs = np.argwhere(mask == i + 1)
-        prop['labels'][i] = mdict[str(i + 1)]
+        prop['labels'][i] = mdict['mask_dict'][str(i + 1)]
         if len(label_locs) > 0:
             # NOTE: the rounding/int-cast here should not be here
             # leaving it in place for now to preserve legacy
             prop['centers'][i] = np.round(
                     label_locs.mean(axis=0)).astype('int')[[-1, -2]]
         prop['pixels'][i] = set([tuple(x) for x in label_locs])
+
+    # sometimes a cell ROI gets transformed outside
+    # add a null column for it
+    for label in mdict['mask_dict'].values():
+        if label not in prop['labels']:
+            prop['labels'].append(label)
+            prop['centers'] = np.append(
+                    prop['centers'],
+                    np.array([0, 0]).reshape(1, -1), axis=0)
+            prop['pixels'].append(set())
     return prop
 
 
@@ -230,14 +234,14 @@ def cell_matching(mask1, mask2, dict1, dict2, max_dist, munkres_exe):
 
     assigned_pairs = gen_assignment_pairs(cost_matrix, munkres_exe)
 
-    matching_table = gen_matching_table(
+    jmatch = gen_matching_table(
             cost_matrix,
             assigned_pairs,
             distance,
             iou,
             max_dist)
 
-    return matching_table, cost_matrix
+    return cost_matrix, jmatch
 
 
 def transform_masks(moving, dst_shape, tform):
@@ -324,6 +328,7 @@ def register_intensity_images(
 
 class PairwiseMatching(ArgSchemaParser):
     default_schema = PairwiseMatchingSchema
+    default_output_schema = PairwiseOutputSchema
     ''' Class for pairwise ophys matching.
 
         Images are registered using intensity correlation.
@@ -372,7 +377,7 @@ class PairwiseMatching(ArgSchemaParser):
             moving_dict = json.load(f)
 
         # matching cells
-        self.matching_table, self.cost_matrix = cell_matching(
+        self.cost_matrix, self.jmatch = cell_matching(
                     segmask_fixed_3d,
                     segmask_moving_3d_registered,
                     fixed_dict,
@@ -380,20 +385,21 @@ class PairwiseMatching(ArgSchemaParser):
                     self.args['maximum_distance'],
                     self.args['munkres_executable'])
 
-        cname = os.path.join(
-                self.args['output_directory'],
-                moving_strid + '_to_' + fixed_strid + '_cost.npy')
-        np.save(cname, self.cost_matrix)
-
-        if self.args['save_pairwise_tables']:
-            save_matching_table(
-                    self.matching_table,
-                    self.args['output_directory'],
-                    moving_strid + '_to_' + fixed_strid)
-
         # if affine only, output full 3x3
         if self.tform.shape == (2, 3):
             self.tform = np.vstack((self.tform, [0, 0, 1]))
+
+        output_json = {
+                'matches': self.jmatch,
+                'fixed_experiment': self.args['fixed']['id'],
+                'moving_experiment': self.args['moving']['id'],
+                'transform': {
+                    "properties": utils.calc_first_order_properties(
+                        self.tform),
+                    'matrix': self.tform.tolist()
+                    }
+                }
+        self.output(output_json, indent=2)
 
         return
 
