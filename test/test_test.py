@@ -30,7 +30,7 @@ def input_file(tmpdir):
 @pytest.mark.parametrize(
         "exe",
         [
-            #None,
+            # None,
             ("/shared/bioapps/infoapps/lims2_modules/"
              "CAM/ophys_ophys_registration/bp_matching")])
 def test_against_old_results(input_file, exe):
@@ -46,8 +46,9 @@ def test_against_old_results(input_file, exe):
     args['input_json'] = input_file
     args['output_json'] = os.path.join(
             os.path.dirname(input_file), 'output.json')
-    args['munkres_executable'] = exe
-    #args['motionType'] = "MOTION_EUCLIDEAN"
+    args['legacy'] = True
+    args['assignment_solver'] = "Hungarian-cpp"
+    args['hungarian_executable'] = exe
     args['save_pairwise_tables'] = True
     n = NwayMatching(input_data=args, args=[])
     n.run()

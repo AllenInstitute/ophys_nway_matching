@@ -1,7 +1,6 @@
 import SimpleITK as sitk
 import numpy as np
 from skimage import measure as ms
-import time
 import pandas as pd
 
 

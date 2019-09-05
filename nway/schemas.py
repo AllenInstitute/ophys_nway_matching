@@ -4,6 +4,9 @@ from argschema.fields import (
         Boolean, Int, Str, Float, Dict,
         List, InputFile, OutputDir, Nested)
 import marshmallow as mm
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class NwayMatchingSchema(ArgSchema):
@@ -36,12 +39,22 @@ class NwayMatchingSchema(ArgSchema):
         default=1.5e-7,
         description=("Threshold of squared error, below which "
                      "registration is terminated"))
-    munkres_executable = Str(
+    hungarian_executable = InputFile(
         required=False,
         missing=None,
         default=None,
-        description=("Executable of Kuhn-Munkres algorithm for bipartite"
-                     "graph matching with path information"))
+        description=("Executable of Hungarian algorithm for bipartite"
+                     "graph matching."))
+    assignment_solver = Str(
+        required=True,
+        default="Blossom",
+        missing="Blossom",
+        validator=mm.validate.OneOf([
+            "Blossom",
+            "Hungarian",
+            "Hungarian-cpp"]),
+        description=("What method to use for solving the assignment problem"
+                     " in pairwise matching"))
     id_pattern = Str(
         required=False,
         missing='ophys_experiment_\d+',
@@ -61,7 +74,7 @@ class NwayMatchingSchema(ArgSchema):
             ]),
         description=("motion model passed to cv2.findTransformECC"
                      "during image registration step."))
-    legacy_ordering = Boolean(
+    legacy = Boolean(
         required=False,
         default=True,
         missing=True,
@@ -70,6 +83,32 @@ class NwayMatchingSchema(ArgSchema):
                      "results exactly with the Hungarian method "
                      "(not recommended). Defaults to legacy order. Switch is"
                      "here for demonstration/experimentation."))
+
+    @mm.post_load
+    def set_legacy(self, data):
+        if data['legacy']:
+            data['assignment_solver'] = 'Hungarian-cpp'
+            logger.warning("legacy mode enabled. This should only be used to "
+                           "reproduce past results. It uses the Hungarian "
+                           "method, which is not recommended (use Blossom "
+                           "instead). Legacy mode also perpetuates an error "
+                           " in scoring matches.")
+
+    @mm.post_load
+    def hungarian_warn(self, data):
+        if "Hungarian" in data['assignment_solver']:
+            logger.warning("Hungarian methid not recommended. It is not "
+                           "stable under permutations for typical cell "
+                           "matching. Use Blossom.")
+
+    @mm.post_load
+    def check_exe(self, data):
+        if data['assignment_solver'] == 'Hungarian-cpp':
+            if data['hungarian_executable'] is None:
+                raise mm.ValidationError(
+                    "one must supply an executable path to "
+                    "--hungarian_executable when specifying "
+                    " --assignment_solver Hungarian-cpp")
 
 
 class ExperimentSchema(DefaultSchema):
@@ -94,7 +133,6 @@ class ExperimentSchema(DefaultSchema):
         description="path to dict for mask labels to LIMS ids")
 
 
-
 class PairwiseMatchingSchema(NwayMatchingSchema):
     output_directory = OutputDir(
         required=True,
@@ -117,6 +155,10 @@ class PairwiseOutputSchema(DefaultSchema):
         Dict,
         required=True,
         description="matches made from pairwise matching")
+    rejected = List(
+        Dict,
+        required=True,
+        description="pairs within max_distance, but not matched")
 
 
 class NwayMatchingOutputSchema(DefaultSchema):
@@ -128,5 +170,3 @@ class NwayMatchingOutputSchema(DefaultSchema):
         Dict,
         required=True,
         description="list of pairwise result dicts")
-
-

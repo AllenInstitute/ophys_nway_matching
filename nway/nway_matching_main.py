@@ -17,6 +17,7 @@ import os
 import json
 import itertools
 import pandas as pd
+import networkx as nx
 from nway.pairwise_matching import PairwiseMatching
 from nway.schemas import NwayMatchingSchema, NwayMatchingOutputSchema
 import nway.utils as utils
@@ -84,7 +85,7 @@ class NwayMatching(ArgSchemaParser):
                     create_nice_mask(
                         exp,
                         self.args['output_directory'],
-                        legacy=self.args['legacy_ordering']))
+                        legacy=self.args['legacy']))
 
         self.expnum = len(self.experiments)
 
@@ -106,7 +107,7 @@ class NwayMatching(ArgSchemaParser):
                 pairj = json.load(f)
             pairframe = pd.DataFrame(
                     [[i['fixed'], i['moving']] for i in pairj['matches']],
-                    columns = [
+                    columns=[
                         pairj['fixed_experiment'],
                         pairj['moving_experiment']])
             matching_frame = matching_frame.append(pairframe)
@@ -177,93 +178,97 @@ class NwayMatching(ArgSchemaParser):
             matrix computed earlier.
         '''
 
-        linenum = np.shape(matching_table_nway)[0]
-        score = np.zeros(linenum)
-        matching_table_nway_new = []
+        nline = np.shape(matching_table_nway)[0]
 
-        # compute score for each record in matching_table_nway
-        for i in range(linenum):
+        exids = [exp['id'] for exp in self.experiments]
 
-            score[i] = 0
-            cnt = 0
-            ecnt = 0
+        # NOTE
+        # assign a score to each line in the matching table
+        # the score is the sum of costs for each pair in the
+        # line. The costs are generally in [0, 2] when the
+        # pair was within max_distance and 1000 when the pair
+        # was not.
+        # the scores are used to choose between conflicting lines
+        # for n experiments, there are np = (n)(n - 1) / 2 pairs
+        # example 1:
+        # line1 = [a, b, -1, -1], line2 = [a, c, -1, -1]
+        # score1 = cost(a, b) + 5000, score2 = cost(a, c) + 5000
+        # if cost(a, b) < cost(a, c), line1 is preferred
+        # example 2:
+        # line1 = [a, b, c, -1], line2 = [a, c, -1, -1]
+        # score1 = cost(a, b) + cost(b, c) + cost(a, c) + 3000
+        # score2 = cost(a, c) + 5000
+        # score1 in range [3000, 3006], score2 in range [5000, 5002]
+        # line1 is preferred
 
-            for j in range(self.expnum - 1):
-                for k in range(j + 1, self.expnum):
-                    #[cellnum1, cellnum2] = \
-                    #        self.pair_matches[cnt].cost_matrix.shape
-                    #if (
-                    #        (matching_table_nway[i][j]-1 < cellnum1) and
-                    #        (matching_table_nway[i][k]-1 < cellnum2)):
-                    cols = self.pair_matches[ecnt].cost_matrix.columns.tolist()
-                    rows = self.pair_matches[ecnt].cost_matrix.index.tolist()
-                    col = matching_table_nway[i][k]
-                    # NOTE: this doesn't make sense!
-                    # but it preserves past results
+        score = np.zeros(nline)
+        for pair in self.pair_matches:
+            with open(pair.args['output_json'], 'r') as f:
+                j = json.load(f)
+            # all possible candidates within max_distance
+            candidates = {
+                    (m['fixed'], m['moving']): m['cost']
+                    for k in ['matches', 'rejected']
+                    for m in j[k]}
+            prow = exids.index(pair.args['fixed']['id'])
+            pcol = exids.index(pair.args['moving']['id'])
+            for i in range(nline):
+                col = matching_table_nway[i][pcol]
+                row = matching_table_nway[i][prow]
+                if self.args['legacy']:
+                    # indexing mistake in original code
                     if col == -1:
-                        col = cols[-2]
-                    row = matching_table_nway[i][j]
+                        col = pair.cost_matrix.columns[-2]
                     if row == -1:
-                        row = rows[-2]
-                    #print(
-                    #        self.pair_matches[ecnt].args['fixed']['id'],
-                    #        self.pair_matches[ecnt].args['moving']['id'],
-                    #        row,
-                    #        col)
-                    score[i] = \
-                            score[i] + \
-                            self.pair_matches[ecnt].cost_matrix[col][row]
-                                    #matching_table_nway[i][j] - 1][
-                                    #        matching_table_nway[i][k] - 1]
-                            #self.pair_matches[cnt].cost_matrix[
-                            #        matching_table_nway[i][j] - 1][
-                            #                matching_table_nway[i][k] - 1]
-                    cnt = cnt + 1
-                    ecnt += 1
-            score[i] = score[i]/cnt
+                        row = pair.cost_matrix.index[-2]
+                    pscore = pair.cost_matrix[col][row]
+                else:
+                    if (row, col) in candidates:
+                        pscore = candidates[(row, col)]
+                    else:
+                        pscore = 1000
+                score[i] += pscore
 
-        # if two records share common elements in the
-        # same column, then create an edge between them
-        edge = np.zeros((linenum, linenum))
-        node_exist = np.ones(linenum)
+        # define a graph with a node for each line in the table
+        # and the score as an attribute
+        G = nx.Graph()
+        for i in range(nline):
+            G.add_node(i, score=score[i])
 
-        for i in range(linenum - 1):  # start from the second line
-            for j in range(i + 1, linenum):
-                for k in range(self.expnum):
-                    if (
-                           (matching_table_nway[j][k] ==
-                               matching_table_nway[i][k]) and
-                           (matching_table_nway[i][k] != -1) and
-                           (matching_table_nway[j][k] != -1)):
-                        edge[i, j] = 1
-                        break
+        # if any 2 lines share an entry, make an edge between them
+        edge = np.zeros((nline, nline))
+        for (i0, line0), (i1, line1) in itertools.combinations(
+                enumerate(matching_table_nway), 2):
+            nz = (line0 != -1) & (line1 != -1)
+            if np.any(line0[nz] == line1[nz]):
+                G.add_edge(i0, i1)
+                edge[i0, i1] = 1
+
+        # NOTE
+        # this is the original logic, rewritten using networkx graph
+        # rather than the custom graph, to be more readable.
+        # this logic is order-dependent!
+        matching_table_nway_new = []
+        nodes = list(G.nodes())
+        for node in nodes:
+            if node in G.nodes():
+                neighbors = nx.neighbors(G, node)
+                neighbor_scores = [G.nodes()[n]['score'] for n in neighbors]
+                node_score = G.nodes()[node]['score']
+                if np.all(node_score <= neighbor_scores):
+                    # if a node has the lowest score of any of its neighbors
+                    # remove the neighbors
+                    [G.remove_node(n) for n in enumerate(neighbors)]
+                else:
+                    # otherwise, remove the node
+                    G.remove_node(node)
+
+        # any remaining nodes are lines for the pruned table
         labelval = 0
-
-        for i in range(linenum):
-            if node_exist[i] == 1:
-                idx = np.argwhere(edge[i, :] == 1)
-                len_idx = len(idx)
-                if len_idx == 0:  # no conflict with other matching
-                    labelval = labelval + 1
-                    this_record = np.append(matching_table_nway[i], labelval)
-                    matching_table_nway_new.append(this_record)
-
-                # score is the smallest, equal may lead
-                # to conflict matching added to the list?
-                elif score[i] <= np.min(score[idx]):
-                    labelval = labelval + 1
-                    this_record = np.append(matching_table_nway[i], labelval)
-                    matching_table_nway_new.append(this_record.astype(int))
-
-                    # remove the nodes connected to it
-                    # as they have worse scores
-                    edge[i, idx] = 0
-                    for k in range(len_idx):
-                        edge[idx[k], :] = 0
-                    node_exist[idx] = 0
-
-                else:  # prune the edge
-                    edge[i, idx] = 0
+        for node in G.nodes():
+            this_record = np.append(matching_table_nway[node], labelval)
+            matching_table_nway_new.append(this_record.astype('int'))
+            labelval += 1
 
         return matching_table_nway_new
 
@@ -277,8 +282,6 @@ class NwayMatching(ArgSchemaParser):
 
         for j in range(self.expnum):
             labels = [v['id'] for v in self.experiments[j]['cell_rois']]
-            #nj = len(self.experiments[j]['cell_rois'])
-            #labels = np.array(range(nj)) + 1
             for i in range(linenum):
                 labels = np.setdiff1d(labels, [matching_table_nway[i][j]])
             label_remain.append(labels)
@@ -322,12 +325,10 @@ class NwayMatching(ArgSchemaParser):
             logger.debug(self.matching_table_nway[i])
 
         for i in range(cellnum):
-            labelstr = str(int(self.matching_table_nway[i][self.expnum]))
             thisrgn = [v for v in self.matching_table_nway[i][:-1] if v != -1]
 
             if len(thisrgn) > 0:
                 matchingdata["nway_matches"].append(thisrgn)
-                #matchingdata["cell_rois"][labelstr] = thisrgn
 
         matchingdata["pairwise_results"] = []
         for k in self.pair_matches:
@@ -338,9 +339,6 @@ class NwayMatching(ArgSchemaParser):
                 os.remove(k.args['output_json'])
 
         return matchingdata
-
-        #with open(output_json, 'w') as myfile:
-        #    json.dump(matchingdata, myfile, sort_keys=True, indent=4)
 
     def match_nway(self, para):
         '''Nway cell matching by calling pairwise
@@ -362,7 +360,8 @@ class NwayMatching(ArgSchemaParser):
         # generate N-way matching table
         matching_frame = self.gen_nway_table_with_redundancy()
 
-        matching_table_nway_tmp = self.remove_nway_table_redundancy(matching_frame)
+        matching_table_nway_tmp = self.remove_nway_table_redundancy(
+                matching_frame)
 
         matching_table_nway_tmp = self.prune_matching_graph(
                 matching_table_nway_tmp)

@@ -1,10 +1,3 @@
-# -*- coding: utf-8 -*-
-"""
-
-Pair-wise matching called by nway matching main function
-
-Copyright (c) Allen Institute for Brain Science
-"""
 import os
 import logging
 import subprocess
@@ -15,6 +8,9 @@ import SimpleITK as sitk
 import cv2
 import scipy.spatial
 import scipy.optimize
+import networkx as nx
+import re
+import itertools
 from argschema import ArgSchemaParser
 import tempfile
 
@@ -25,18 +21,17 @@ logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
 
-def gen_assignment_pairs(cost_matrix, cpp_executable=None):
+def gen_assignment_pairs(cost_matrix, solver, hungarian_exe):
     '''Generate self.matching_table using bipartite graph matching.'''
 
     cost_matrix_array = np.array(cost_matrix)
 
-    if cpp_executable:
-        # C++
+    if solver == 'Hungarian-cpp':
         infile = tempfile.NamedTemporaryFile(delete=False).name
         outfile = tempfile.NamedTemporaryFile(delete=False).name
         np.savetxt(infile, cost_matrix_array, delimiter=' ')
         cpp_args = [
-                cpp_executable,
+                hungarian_exe,
                 infile,
                 str(cost_matrix_array.shape[0]),
                 str(cost_matrix_array.shape[1]),
@@ -46,16 +41,40 @@ def gen_assignment_pairs(cost_matrix, cpp_executable=None):
                 outfile, delimiter=' ').astype('int')
         [os.remove(i) for i in [infile, outfile] if os.path.isfile(i)]
 
-    else:
-        # scipy
+    elif solver == 'Hungarian':
         assigned_pairs = np.transpose(
                 np.array(
                     scipy.optimize.linear_sum_assignment(
                         cost_matrix_array)))
+    elif solver == 'Blossom':
+        nrow, ncol = cost_matrix.shape
+        i, j = np.mgrid[0:nrow:1, 0:ncol:1]
+        # Blossom method is max weight, Hungarian is min weight
+        weight = 1.0 / (1.0 + cost_matrix)
+        ind = np.nonzero(weight > 0.002)
+        etuples = [('r_%d' % ii, 'c_%d' % jj, {'weight': ww})
+                   for ii, jj, ww in zip(
+                       i[ind].flatten(),
+                       j[ind].flatten(),
+                       weight[ind].flatten())]
+        G = nx.Graph()
+        G.add_edges_from(etuples)
+        k = nx.max_weight_matching(G)
+
+        def get_pair_from_tuple(tup):
+            rs = re.compile("r_(\d+)")
+            cs = re.compile("c_(\d+)")
+            x = " ".join(tup)
+            pair = [
+                    int(rs.search(x).groups()[0]),
+                    int(cs.search(x).groups()[0])]
+            return pair
+        assigned_pairs = [get_pair_from_tuple(ik) for ik in k]
 
     row_lab = cost_matrix.index.tolist()
     col_lab = cost_matrix.columns.tolist()
-    pairlabels = [[row_lab[pair[0]], col_lab[pair[1]]] for pair in assigned_pairs]
+    pairlabels = [[row_lab[pair[0]], col_lab[pair[1]]]
+                  for pair in assigned_pairs]
 
     return pairlabels
 
@@ -64,44 +83,25 @@ def gen_matching_table(
         cost_matrix, assigned_pairs, distance, iou, max_distance):
     '''Generate self.matching_table using bipartite graph matching.'''
 
-    jmatch = []
-    for ap in assigned_pairs:
-        if distance[ap[1]][ap[0]] < max_distance:
-            jmatch.append({
-                "fixed" : ap[0],
-                "moving": ap[1],
-                'distance': distance[ap[1]][ap[0]],
-                'iou': iou[ap[1]][ap[0]],
-                'cost': cost_matrix[ap[1]][ap[0]]
-                })
+    # candidates within max_distance, but not assigned
+    rejected = []
+    matches = []
+    cols = cost_matrix.columns.tolist()
+    rows = cost_matrix.index.tolist()
+    for row, col in itertools.product(rows, cols):
+        if distance[col][row] < max_distance:
+            imatch = {
+                    "fixed": row,
+                    "moving": col,
+                    'distance': distance[col][row],
+                    'iou': iou[col][row],
+                    'cost': cost_matrix[col][row]}
+            if [row, col] in assigned_pairs:
+                matches.append(imatch)
+            else:
+                rejected.append(imatch)
 
-    #num_matched = 0
-    #matching_table = []
-    #jmatched = []
-    #for ap in assigned_pairs:
-    #    if distance[ap[1]][ap[0]] < max_distance:
-    #        matching_table.append([
-    #            ap[0],
-    #            ap[1],
-    #            distance[ap[1]][ap[0]],
-    #            iou[ap[1]][ap[0]],
-    #            cost_matrix[ap[1]][ap[0]]])
-    #        jmatched.append(ap[1])
-    #    else:
-    #        matching_table.append([ap[0], -1, -1, -1, -1])
-    #for j in cost_matrix.columns.tolist():
-    #    if j not in jmatched:
-    #        matching_table.append([-1, ap[1], -1, -1, -1])
-
-    return jmatch
-
-
-def save_matching_table(table, output_directory, basename):
-    np.savetxt(
-            os.path.join(output_directory, basename),
-            table,
-            delimiter=' ',
-            fmt="%d %d %7.4e %7.4e %7.4e")
+    return matches, rejected
 
 
 def region_properties(mask, mdict):
@@ -123,9 +123,6 @@ def region_properties(mask, mdict):
             (row, column) tuples of pixels for each label
 
     """
-    if len(mask.shape) not in [2, 3]:
-        raise ValueError("region_properties needs a 2D or 3D image")
-
     prop = {}
     n = mask.max()
     prop['centers'] = np.zeros((n, 2))
@@ -225,23 +222,23 @@ def calculate_cost_matrix(distance, iou, maximum_distance):
     return cost_matrix
 
 
-def cell_matching(mask1, mask2, dict1, dict2, max_dist, munkres_exe):
+def cell_matching(mask1, mask2, dict1, dict2, max_dist, solver, hungarian_exe):
     ''' Function that matches cells. '''
 
     distance, iou = calculate_distance_and_iou(mask1, mask2, dict1, dict2)
 
     cost_matrix = calculate_cost_matrix(distance, iou, max_dist)
 
-    assigned_pairs = gen_assignment_pairs(cost_matrix, munkres_exe)
+    assigned_pairs = gen_assignment_pairs(cost_matrix, solver, hungarian_exe)
 
-    jmatch = gen_matching_table(
+    matches, rejected = gen_matching_table(
             cost_matrix,
             assigned_pairs,
             distance,
             iou,
             max_dist)
 
-    return cost_matrix, jmatch
+    return cost_matrix, matches, rejected
 
 
 def transform_masks(moving, dst_shape, tform):
@@ -377,20 +374,22 @@ class PairwiseMatching(ArgSchemaParser):
             moving_dict = json.load(f)
 
         # matching cells
-        self.cost_matrix, self.jmatch = cell_matching(
+        self.cost_matrix, self.matches, self.rejected = cell_matching(
                     segmask_fixed_3d,
                     segmask_moving_3d_registered,
                     fixed_dict,
                     moving_dict,
                     self.args['maximum_distance'],
-                    self.args['munkres_executable'])
+                    self.args['assignment_solver'],
+                    self.args['hungarian_executable'])
 
         # if affine only, output full 3x3
         if self.tform.shape == (2, 3):
             self.tform = np.vstack((self.tform, [0, 0, 1]))
 
         output_json = {
-                'matches': self.jmatch,
+                'matches': self.matches,
+                'rejected': self.rejected,
                 'fixed_experiment': self.args['fixed']['id'],
                 'moving_experiment': self.args['moving']['id'],
                 'transform': {
