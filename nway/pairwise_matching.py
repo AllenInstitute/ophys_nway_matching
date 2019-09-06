@@ -22,7 +22,25 @@ logger.setLevel(logging.INFO)
 
 
 def gen_assignment_pairs(cost_matrix, solver, hungarian_exe):
-    '''Generate self.matching_table using bipartite graph matching.'''
+    """generate pairs via an assignment problem solver
+
+    Parameters
+    ----------
+    cost_matrix : :class:`pandas.DataFrame`
+        index = labels1, columns = labels2
+        N x M calculated cost matrix
+    solver : str
+       one of "Hungarian-cpp", "Hungarian" (scipy), or "Blossom"
+    hungarian_exe : str
+       absolute path to compiled Hungarian executable
+
+    Returns
+    -------
+    pairlabels : list
+        pairs of labels [label from row (index), label from column]
+        that are the assigned matches
+
+    """
 
     cost_matrix_array = np.array(cost_matrix)
 
@@ -81,7 +99,43 @@ def gen_assignment_pairs(cost_matrix, solver, hungarian_exe):
 
 def gen_matching_table(
         cost_matrix, assigned_pairs, distance, iou, max_distance):
-    '''Generate self.matching_table using bipartite graph matching.'''
+    """generate rich summary of the matched pairs
+
+    Parameters
+    ----------
+    cost_matrix : :class:`pandas.DataFrame`
+        index = labels1, columns = labels2
+        N x M calculated cost matrix
+    assigned_pairs : list
+        pairs of labels [label from row (index), label from column]
+        that are the assigned matches
+    distance : :class:`pandas.DataFrame`
+        index = labels1, columns = labels2
+        Euclidean distance of centers
+    iou : :class:`pandas.DataFrame`
+        index = labels1, columns = labels2
+        intersection-over-union pixel area ratios
+    maximum_distance : Int
+        threshold beyond which a large cost
+        will be incurred
+
+    Returns
+    -------
+    matches : list of dict
+        list of matches
+        each match:
+        {
+          "distance": euclidean distance between centers
+          "iou": intersection over union of mask pixels
+          "fixed": fixed cell id
+          "moving": moving cell id
+          "cost": calculated cost
+        }
+    rejected : list of dict
+        list of pairs within max_dist threshold which were not chosen
+        same structure as matches
+
+    """
 
     # candidates within max_distance, but not assigned
     rejected = []
@@ -110,8 +164,7 @@ def region_properties(mask, mdict):
     Parameters
     ----------
     mask : :class:`numpy.ndarray`
-        2D mask image (row x column) or
-        3D mask image (n x row x column) (untested)
+        3D mask image (n x row x column)
 
     Returns
     -------
@@ -150,26 +203,35 @@ def region_properties(mask, mdict):
     return prop
 
 
-def calculate_distance_and_iou(mask1, mask2, dict1, dict2):
+def calculate_distance_and_iou(mask1, mask2, dict1, dict2, legacy=False):
     """Compute distance and intersection-over-union
     for the labels in two masks
 
     Parameters
     ----------
     mask1 : :class:`numpy.ndarray`
-        2D mask image (row x column) or
-        3D mask image (n x row x column) (untested)
+        3D mask image (n x row x column)
     mask2 : :class:`numpy.ndarray`
-        2D mask image (row x column) or
-        3D mask image (n x row x column) (untested)
+        3D mask image (n x row x column)
+    dict1 : dict
+        mapping for mask1
+        {
+          "experiment": id of experiment
+          "mask_path": absolute path to mask
+          "mask_dict": {str(intensity): cellid}
+        }
+    dict2 : dict
+        mapping for mask2
+    legacy : bool
+        whether to preserve legacy behavior
 
     Returns
     -------
-    distance : :class:`numpy.ndarray`
-        n_unique_labels1 x n_unique_labels2,
+    distance : :class:`pandas.DataFrame`
+        index = labels1, columns = labels2
         Euclidean distance of centers
-    iou : :class:`numpy.ndarray`
-        n_unique_labels1 x n_unique_labels2,
+    iou : :class:`pandas.DataFrame`
+        index = labels1, columns = labels2
         intersection-over-union pixel area ratios
 
     """
@@ -184,8 +246,16 @@ def calculate_distance_and_iou(mask1, mask2, dict1, dict2):
     iou = np.zeros_like(distance)
     for i, ipix in enumerate(prop1['pixels']):
         for j, jpix in enumerate(prop2['pixels']):
-            iou[i, j] = \
-                    len(ipix.intersection(jpix)) / len(ipix.union(jpix))
+            intersection = len(ipix.intersection(jpix))
+            union = len(ipix.union(jpix))
+            if legacy:
+                # NOTE
+                # the orginal was written in python 2 and
+                # the IOU calculation almost always gave 0 :(
+                # as does this still
+                iou[i, j] = intersection // union
+            else:
+                iou[i, j] = float(intersection) / union
 
     distance = utils.frame_from_array(
         distance, prop1['labels'], prop2['labels'])
@@ -200,17 +270,20 @@ def calculate_cost_matrix(distance, iou, maximum_distance):
 
     Parameters
     ----------
-    distance : :class:`numpy.ndarray`
-        N x M array of label center distances
-    iou : :class:`numpy.ndarray`
-        N x M array of label ious
+    distance : :class:`pandas.DataFrame`
+        index = labels1, columns = labels2
+        Euclidean distance of centers
+    iou : :class:`pandas.DataFrame`
+        index = labels1, columns = labels2
+        intersection-over-union pixel area ratios
     maximum_distance : Int
         threshold beyond which a large cost
         will be incurred
 
     Returns
     -------
-    cost_matrix : :class:`numpy.ndarray`
+    cost_matrix : :class:`pandas.DataFrame`
+        index = labels1, columns = labels2
         N x M calculated cost matrix
 
     """
@@ -222,10 +295,62 @@ def calculate_cost_matrix(distance, iou, maximum_distance):
     return cost_matrix
 
 
-def cell_matching(mask1, mask2, dict1, dict2, max_dist, solver, hungarian_exe):
-    ''' Function that matches cells. '''
+def cell_matching(
+        mask1, mask2, dict1, dict2, max_dist, solver, hungarian_exe,
+        legacy=False):
+    """matching between 2 masks
 
-    distance, iou = calculate_distance_and_iou(mask1, mask2, dict1, dict2)
+    Parameters
+    ----------
+    mask1 : :class:`numpy.ndarray`
+        3D mask image (n x row x column)
+    mask2 : :class:`numpy.ndarray`
+        3D mask image (n x row x column)
+    dict1 : dict
+        mapping for mask1
+        {
+          "experiment": id of experiment
+          "mask_path": absolute path to mask
+          "mask_dict": {str(intensity): cellid}
+        }
+    dict2 : dict
+        mapping for mask2
+    max_dist : int
+        maximum distance threshold [pixels]. In the case of
+        the Hungarian minimum weight algorithm, pairs beyond this
+        threshold will receive a very large weight. In the case
+        of the Blossom algorithm, pairs beyond this threshold will
+        not be part of the graph.
+    solver : str
+       one of "Hungarian-cpp", "Hungarian" (scipy), or "Blossom"
+    hungarian_exe : str
+       absolute path to compiled Hungarian executable
+    legacy : bool
+        whether to preserve legacy behavior
+
+    Returns
+    -------
+    cost_matrix : :class:`pandas.DataFrame`
+        index = labels1, columns = labels2
+        N x M calculated cost matrix
+    matches : list of dict
+        list of matches
+        each match:
+        {
+          "distance": euclidean distance between centers
+          "iou": intersection over union of mask pixels
+          "fixed": fixed cell id
+          "moving": moving cell id
+          "cost": calculated cost
+        }
+    rejected : list of dict
+        list of pairs within max_dist threshold which were not chosen
+        same structure as matches
+
+    """
+
+    distance, iou = calculate_distance_and_iou(
+        mask1, mask2, dict1, dict2, legacy=legacy)
 
     cost_matrix = calculate_cost_matrix(distance, iou, max_dist)
 
@@ -241,9 +366,24 @@ def cell_matching(mask1, mask2, dict1, dict2, max_dist, solver, hungarian_exe):
     return cost_matrix, matches, rejected
 
 
-def transform_masks(moving, dst_shape, tform):
-    ''' Transform segmentation masks using the affine
-        transformation defined by tform'''
+def transform_mask(moving, dst_shape, tform):
+    """warp a mask according to a transform
+
+    Parameters
+    ----------
+    moving : :class:`numpy.ndarray`
+        nlayers x n x m int
+    dst_shape : tuple
+        (n', m') shape of destination layers
+    tform : :class:`numpy.ndarry`
+        3 x 3 transformation matrix
+
+    Returns
+    -------
+    transformed_3d : :class:`numpy.ndarray`
+        nlayer x n' x m' int
+
+    """
 
     transformed_3d = np.zeros(
             (
@@ -259,7 +399,7 @@ def transform_masks(moving, dst_shape, tform):
         for label in labels:
             tmp = np.zeros_like(frame).astype('float32')
             tmp[frame == label] = 1
-            tmp_registered = cv2.warpAffine(
+            tmp_registered = cv2.warpPerspective(
                     tmp,
                     tform,
                     dst_shape[::-1],
@@ -272,18 +412,38 @@ def transform_masks(moving, dst_shape, tform):
     return transformed_3d
 
 
-cvmotion = {
-        "MOTION_TRANSLATION": cv2.MOTION_TRANSLATION,
-        "MOTION_EUCLIDEAN": cv2.MOTION_EUCLIDEAN,
-        "MOTION_AFFINE": cv2.MOTION_AFFINE,
-        "MOTION_HOMOGRAPHY": cv2.MOTION_HOMOGRAPHY}
-
-
 def register_intensity_images(
-        img_path_fixed, img_path_moving, maxCount, epsilon,
-        save_image, output_directory, basename, motiontype):
-    ''' Register the average intensity images of the two ophys
-        sessions using affine transformation'''
+        img_path_fixed, img_path_moving, maxCount, epsilon, motion_type):
+    """find the transform that registers two images
+
+    Parameters
+    ----------
+    img_path_fixed : str
+        path to fixed image
+    img_path_moving : str
+        path to moving image
+    maxCount : int
+        passed as maxCount to opencv termination criteria
+    epsilon : float
+        passed as epsilon to opencv termination criteria
+    motion_type : str
+        one of the 4 possible motion types for opencv findTransformECC
+
+    Returns
+    -------
+    tform : :class:`numpy.ndarry`
+        3 x 3 transformation matrix
+
+    img_moving_warped : :class:`numpy.ndarray`
+        warped moving image, same shape as fixed image, uint8
+
+    """
+
+    cvmotion = {
+            "MOTION_TRANSLATION": cv2.MOTION_TRANSLATION,
+            "MOTION_EUCLIDEAN": cv2.MOTION_EUCLIDEAN,
+            "MOTION_AFFINE": cv2.MOTION_AFFINE,
+            "MOTION_HOMOGRAPHY": cv2.MOTION_HOMOGRAPHY}
 
     # read average intensity images
     img_fixed = np.array(im.open(img_path_fixed))
@@ -295,13 +455,17 @@ def register_intensity_images(
             maxCount,
             epsilon)
 
+    warp_matrix = np.eye(2, 3, dtype=np.float32)
+    if motion_type == 'MOTION_HOMOGRAPHY':
+        warp_matrix = np.eye(3, 3, dtype=np.float32)
+
     try:
         # Run the ECC algorithm. The results are stored in warp_matrix.
         ccval, tform = cv2.findTransformECC(
                 img_fixed,
                 img_moving,
-                np.eye(2, 3, dtype=np.float32),
-                cvmotion[motiontype],
+                warp_matrix,
+                cvmotion[motion_type],
                 criteria)
     except cv2.error:
         logger.error("failed to align images {} and {}".format(
@@ -313,12 +477,11 @@ def register_intensity_images(
             img_moving,
             tform,
             img_fixed.shape[::-1],
-            flags=cv2.INTER_LINEAR + cv2.WARP_INVERSE_MAP)
+            flags=cv2.INTER_LINEAR + cv2.WARP_INVERSE_MAP).astype(np.uint8)
 
-    if save_image:
-        sitk.WriteImage(
-                sitk.GetImageFromArray(img_moving_warped.astype(np.uint8)),
-                os.path.join(output_directory, basename).encode('utf-8'))
+    # if affine only, output full 3x3
+    if tform.shape == (2, 3):
+        tform = np.vstack((tform, [0, 0, 1]))
 
     return tform, img_moving_warped
 
@@ -326,15 +489,12 @@ def register_intensity_images(
 class PairwiseMatching(ArgSchemaParser):
     default_schema = PairwiseMatchingSchema
     default_output_schema = PairwiseOutputSchema
-    ''' Class for pairwise ophys matching.
-
-        Images are registered using intensity correlation.
-        Best matches between cells are determined by bipartite graph matching.
-    '''
+    """Class for matching cells between optical physiology sessions
+    """
 
     def run(self):
-        ''' Pairwise matching of ophys-ophys sessions. '''
-
+        """main function call for PairwiseMatching
+        """
         self.logger.info('Matching %d to %d ...' % (
             self.args['fixed']['id'],
             self.args['moving']['id']))
@@ -351,19 +511,23 @@ class PairwiseMatching(ArgSchemaParser):
                     'ophys_average_intensity_projection_image'],
                 self.args['registration_iterations'],
                 self.args['registration_precision'],
-                self.args['save_registered_image'],
-                self.args['output_directory'],
-                'register_%s_to_%s.tif' % (moving_strid, fixed_strid),
                 self.args['motionType'])
+
+        if self.args['save_registered_image']:
+            imfname = os.path.join(
+                self.args['output_directory'],
+                'register_%s_to_%s.tif' % (moving_strid, fixed_strid))
+            sitk.WriteImage(
+                sitk.GetImageFromArray(moving_warped),
+                imfname.encode('utf-8'))
 
         segmask_fixed_3d = utils.read_tiff_3d(
                 self.args['fixed']['nice_mask_path'])
         segmask_moving_3d = utils.read_tiff_3d(
                 self.args['moving']['nice_mask_path'])
 
-        # transform moving segmentation masks
-        # compute self.segmask_moving_3d_registered
-        segmask_moving_3d_registered = transform_masks(
+        # transform moving segmentation mask
+        segmask_moving_3d_registered = transform_mask(
                 segmask_moving_3d,
                 segmask_fixed_3d.shape[1:],
                 self.tform)
@@ -381,11 +545,8 @@ class PairwiseMatching(ArgSchemaParser):
                     moving_dict,
                     self.args['maximum_distance'],
                     self.args['assignment_solver'],
-                    self.args['hungarian_executable'])
-
-        # if affine only, output full 3x3
-        if self.tform.shape == (2, 3):
-            self.tform = np.vstack((self.tform, [0, 0, 1]))
+                    self.args['hungarian_executable'],
+                    legacy=self.args['legacy'])
 
         output_json = {
                 'matches': self.matches,
