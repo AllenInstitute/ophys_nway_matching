@@ -2,6 +2,7 @@ import os
 import logging
 import subprocess
 import numpy as np
+import pandas as pd
 import json
 from PIL import Image as im
 import SimpleITK as sitk
@@ -257,10 +258,8 @@ def calculate_distance_and_iou(mask1, mask2, dict1, dict2, legacy=False):
             else:
                 iou[i, j] = float(intersection) / union
 
-    distance = utils.frame_from_array(
-        distance, prop1['labels'], prop2['labels'])
-    iou = utils.frame_from_array(
-        iou, prop1['labels'], prop2['labels'])
+    distance = pd.DataFrame(distance, prop1['labels'], prop2['labels'])
+    iou = pd.DataFrame(iou, prop1['labels'], prop2['labels'])
 
     return distance, iou
 
@@ -290,7 +289,7 @@ def calculate_cost_matrix(distance, iou, maximum_distance):
     norm_dist = np.array(distance) / maximum_distance
     norm_dist[norm_dist > 1] = 999.0
     cost_matrix = norm_dist + (1.0 - np.array(iou))
-    cost_matrix = utils.frame_from_array(
+    cost_matrix = pd.DataFrame(
             cost_matrix, distance.index.tolist(), distance.columns.tolist())
     return cost_matrix
 
