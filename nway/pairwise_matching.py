@@ -77,7 +77,8 @@ def gen_assignment_pairs(cost_matrix, solver, hungarian_exe):
 
         G = nx.Graph()
         G.add_edges_from(etuples)
-        pairlabels = list(nx.max_weight_matching(G))
+        nxresults = nx.max_weight_matching(G)
+        pairlabels = list([list(i) for i in nxresults])
 
         # sometimes networkx reverses the order
         for i in range(len(pairlabels)):

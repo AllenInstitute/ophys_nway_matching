@@ -26,19 +26,24 @@ logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
 
+class NwayException(Exception):
+    pass
+
+
 class NwayMatching(ArgSchemaParser):
     default_schema = NwayMatchingSchema
     default_output_schema = NwayMatchingOutputSchema
-    ''' Class for matching cells across arbitrary number of ophys sessions.
-
-        Necessary files are obtained by parsing input json. Final Nway matching
-        result is obtained by combining pairwise matching.
-    '''
 
     def parse_jsons(self, input_json):
-        '''Parse input json file to genearte the
-           necessary input files for nway cell matching.'''
+        """read the input json, populate the experiments
+        with nice masks.
 
+        Parameters
+        ----------
+        input_json : str
+            path to json file containing nway matching input
+
+        """
         with open(input_json, 'r') as f:
             data = json.load(f)
 
@@ -53,17 +58,13 @@ class NwayMatching(ArgSchemaParser):
                         self.args['output_directory'],
                         legacy_label_order=self.args['legacy_label_order']))
 
-        self.expnum = len(self.experiments)
-
-        if self.expnum < 2:
-            raise RuntimeError(
-                    "There should be at least two "
-                    "experiments! Check input json.")
+        if len(self.experiments) < 2:
+            raise NwayException("Need at least 2 experiements from input")
 
     def gen_nway_table_with_redundancy(self):
-        '''Generate initial Nway matching table with redundancy rows by
-           scanning every matching pair in all pairwise matching results.
-        '''
+        """Combine all pairwise matches into one table
+        regardless of conflicts.
+        """
 
         matching_frame = pd.DataFrame(
             columns=[e['id'] for e in self.experiments])
@@ -246,19 +247,19 @@ class NwayMatching(ArgSchemaParser):
         matching_table_nway_new = matching_table_nway
         label_remain = []
 
-        for j in range(self.expnum):
+        for j in range(len(self.experiments)):
             labels = [v['id'] for v in self.experiments[j]['cell_rois']]
             for i in range(linenum):
                 labels = np.setdiff1d(labels, [matching_table_nway[i][j]])
             label_remain.append(labels)
 
-        for i in range(self.expnum):
+        for i in range(len(self.experiments)):
             num = len(label_remain[i])
             for j in range(num):
                 cnt = cnt + 1
-                this_record = np.zeros(self.expnum + 1) - 1
+                this_record = np.zeros(len(self.experiments) + 1) - 1
                 this_record[i] = label_remain[i][j]
-                this_record[self.expnum] = cnt
+                this_record[len(self.experiments)] = cnt
                 matching_table_nway_new.append(this_record.astype(int))
 
         return matching_table_nway_new
@@ -281,11 +282,11 @@ class NwayMatching(ArgSchemaParser):
         cellnum = np.shape(self.matching_table_nway)[0]
         matchingdata = dict()
         matchingdata["nway_matches"] = []
-        prob = np.zeros(self.expnum)
+        prob = np.zeros(len(self.experiments))
 
         for i in range(cellnum):
             matching_exp_num = \
-                    self.expnum - 1 - \
+                    len(self.experiments) - 1 - \
                     np.count_nonzero(self.matching_table_nway[i] == -1)
             prob[matching_exp_num] = prob[matching_exp_num] + 1
             logger.debug(self.matching_table_nway[i])
@@ -357,6 +358,6 @@ class NwayMatching(ArgSchemaParser):
         self.output(output_json, indent=2)
 
 
-if __name__ == "__main__":
+if __name__ == "__main__":  # pragma: no cover
     nmod = NwayMatching()
     nmod.run()

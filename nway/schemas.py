@@ -92,7 +92,7 @@ class CommonMatchingSchema(ArgSchema):
                      "NOTE: some of these legacy settings are mistakes. "))
 
     @mm.pre_load
-    def set_legacy(self, data):
+    def set_common_legacy(self, data):
         if data['legacy']:
             data['integer_centroids'] = True
             data['iou_rounding'] = True
@@ -147,7 +147,7 @@ class NwayMatchingSchema(CommonMatchingSchema):
         description="preserve index error in nway-pruning")
 
     @mm.pre_load
-    def set_legacy(self, data):
+    def set_nway_legacy(self, data):
         if data['legacy']:
             data['legacy_label_order'] = True
             data['legacy_pruning_index_error'] = True

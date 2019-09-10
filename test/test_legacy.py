@@ -9,6 +9,9 @@ TEST_FILE_DIR = os.path.join(
         os.path.dirname(os.path.abspath(__file__)),
         'test_files')
 
+cppexe = ("/shared/bioapps/infoapps/lims2_modules/"
+          "CAM/ophys_ophys_registration/bp_matching")
+
 
 @pytest.fixture(scope='function')
 def input_file(tmpdir):
@@ -27,13 +30,7 @@ def input_file(tmpdir):
     yield input_json
 
 
-@pytest.mark.parametrize(
-        "exe",
-        [
-            # None,
-            ("/shared/bioapps/infoapps/lims2_modules/"
-             "CAM/ophys_ophys_registration/bp_matching")])
-def test_against_old_results(input_file, exe):
+def test_against_old_results(input_file):
     assert os.path.isfile(input_file)
     with open(input_file, 'r') as f:
         j = json.load(f)
@@ -47,7 +44,7 @@ def test_against_old_results(input_file, exe):
     args['output_json'] = os.path.join(
             os.path.dirname(input_file), 'output.json')
     args['legacy'] = True
-    args['hungarian_executable'] = exe
+    args['hungarian_executable'] = cppexe
     args['save_pairwise_tables'] = True
     n = NwayMatching(input_data=args, args=[])
     n.run()
