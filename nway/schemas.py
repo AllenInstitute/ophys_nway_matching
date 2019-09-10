@@ -9,26 +9,34 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-class NwayMatchingSchema(ArgSchema):
-    ''' Class that uses argschema to take care of input arguments '''
+class ExperimentSchema(DefaultSchema):
+    id = Int(
+        required=True,
+        description="experiment id")
+    ophys_average_intensity_projection_image = InputFile(
+        required=True,
+        description="max projection intensity image")
+    max_int_mask_image = InputFile(
+        required=True,
+        description="mask image")
+    cell_rois = List(
+        Dict,
+        required=True,
+        description='dict mapping of ids, labels, zs,')
+    nice_mask_path = InputFile(
+        required=True,
+        description="path to mask tiff with unique labels")
+    nice_dict_path = InputFile(
+        required=True,
+        description="path to dict for mask labels to LIMS ids")
 
-    save_registered_image = Boolean(
-        required=False,
-        default=True,
-        description='Whether to save registered image.')
-    save_pairwise_results = Boolean(
-        required=False,
-        default=False,
-        description=("Whether to save pairwise output jsons"))
+
+class CommonMatchingSchema(ArgSchema):
     maximum_distance = Int(
         required=False,
         default=10,
         description=("Maximum distance (in pixels) between two cells,"
                      " above which a match is always rejected."))
-    diagnostic_figures = Boolean(
-        required=False,
-        default=False,
-        desciption='Plot diagnostic figures.')
     registration_iterations = Int(
         required=False,
         default=1000,
@@ -55,13 +63,6 @@ class NwayMatchingSchema(ArgSchema):
             "Hungarian-cpp"]),
         description=("What method to use for solving the assignment problem"
                      " in pairwise matching"))
-    id_pattern = Str(
-        required=False,
-        missing='ophys_experiment_\d+',
-        default='ophys_experiment_\d+',
-        description=("passed to re.findall() as search pattern "
-                     "on the input intensity filename and used "
-                     "for naming intermediate and output files. "))
     motionType = Str(
         required=False,
         missing="MOTION_AFFINE",
@@ -71,28 +72,31 @@ class NwayMatchingSchema(ArgSchema):
             "MOTION_EUCLIDEAN",
             "MOTION_AFFINE",
             "MOTION_HOMOGRAPHY"
-            ]),
-        description=("motion model passed to cv2.findTransformECC"
-                     "during image registration step."))
+            ]))
+    integer_centroids = Boolean(
+        required=False,
+        default=False,
+        missing=False,
+        description="round ROI centroids to integer values")
+    iou_rounding = Boolean(
+        required=False,
+        default=False,
+        missing=False,
+        description="use legacy '//' that sets almost all IOU's to zero")
     legacy = Boolean(
         required=False,
-        default=True,
-        missing=True,
-        description=("maintain legacy ordering from skimage.measure.label. "
-                     "This is only important when trying to reproduce past "
-                     "results exactly with the Hungarian method "
-                     "(not recommended). Defaults to legacy order. Switch is"
-                     "here for demonstration/experimentation."))
+        default=False,
+        missing=False,
+        description=("Establishes 6 settings to reproduce legacy results. "
+                     "3 settings are in pairwise and 3 settings are in nway. "
+                     "NOTE: some of these legacy settings are mistakes. "))
 
-    @mm.post_load
+    @mm.pre_load
     def set_legacy(self, data):
         if data['legacy']:
+            data['integer_centroids'] = True
+            data['iou_rounding'] = True
             data['assignment_solver'] = 'Hungarian-cpp'
-            logger.warning("legacy mode enabled. This should only be used to "
-                           "reproduce past results. It uses the Hungarian "
-                           "method, which is not recommended (use Blossom "
-                           "instead). Legacy mode also perpetuates an error "
-                           " in scoring matches.")
 
     @mm.post_load
     def hungarian_warn(self, data):
@@ -111,34 +115,66 @@ class NwayMatchingSchema(ArgSchema):
                     " --assignment_solver Hungarian-cpp")
 
 
-class ExperimentSchema(DefaultSchema):
-    id = Int(
-        required=True,
-        description="experiment id")
-    ophys_average_intensity_projection_image = InputFile(
-        required=True,
-        description="max projection intensity image")
-    max_int_mask_image = InputFile(
-        required=True,
-        description="mask image")
-    cell_rois = List(
-        Dict,
-        required=True,
-        description='dict mapping of ids, labels, zs,')
-    nice_mask_path = InputFile(
-        required=True,
-        description="path to mask tiff with unique labels")
-    nice_dict_path = InputFile(
-        required=True,
-        description="path to dict for mask labels to LIMS ids")
-
-
-class PairwiseMatchingSchema(NwayMatchingSchema):
+class NwayMatchingSchema(CommonMatchingSchema):
+    ''' Class that uses argschema to take care of input arguments '''
     output_directory = OutputDir(
         required=True,
-        description="destination for output files")
+        missing=None,
+        default=None,
+        description=("destination for output files. If None, will be set from "
+                     "output_directory field in input file"))
+    save_pairwise_results = Boolean(
+        required=False,
+        default=False,
+        description=("Whether to save pairwise output jsons"))
+    legacy_label_order = Boolean(
+        required=False,
+        default=False,
+        missing=False,
+        description=("insist on per-layer mask label ordering created by "
+                     "skimage.measure.label. Does not matter, except for "
+                     "legacy Hungarian assignment."))
+    legacy_pruning_order_dependence = Boolean(
+        required=False,
+        default=False,
+        missing=False,
+        description=("use original nway-pruning logic which is "
+                     "order-dependent"))
+    legacy_pruning_index_error = Boolean(
+        required=False,
+        default=False,
+        missing=False,
+        description="preserve index error in nway-pruning")
+
+    @mm.pre_load
+    def set_legacy(self, data):
+        if data['legacy']:
+            data['legacy_label_order'] = True
+            data['legacy_pruning_index_error'] = True
+            data['legacy_pruning_order_dependence'] = True
+
+
+class PairwiseMatchingSchema(CommonMatchingSchema):
+    output_directory = OutputDir(
+        required=True,
+        description="destination for output files.")
+    save_registered_image = Boolean(
+        required=False,
+        default=True,
+        description='Whether to save registered image.')
     fixed = Nested(ExperimentSchema)
     moving = Nested(ExperimentSchema)
+
+
+class NwayMatchingOutputSchema(DefaultSchema):
+    nway_matches = List(
+        List(Int),
+        required=True,
+        description="list of lists of matching IDs")
+    pairwise_results = List(
+        Dict,
+        required=True,
+        description="list of pairwise result dicts")
 
 
 class PairwiseOutputSchema(DefaultSchema):
@@ -159,14 +195,3 @@ class PairwiseOutputSchema(DefaultSchema):
         Dict,
         required=True,
         description="pairs within max_distance, but not matched")
-
-
-class NwayMatchingOutputSchema(DefaultSchema):
-    nway_matches = List(
-        List(Int),
-        required=True,
-        description="list of lists of matching IDs")
-    pairwise_results = List(
-        Dict,
-        required=True,
-        description="list of pairwise result dicts")

@@ -12,7 +12,6 @@ Usage:
 
 import logging
 import numpy as np
-import SimpleITK as sitk
 import os
 import json
 import itertools
@@ -25,41 +24,6 @@ from argschema import ArgSchemaParser
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
-
-
-def create_nice_mask(experiment, output_directory, legacy=True):
-    '''Generate label to roi id mapping dictionary. ROIs are coded in input json.
-       Labels are coded in segmented cell mask images.
-    '''
-
-    nice_mask, mask_dict = utils.labeled_mask_from_experiment(
-            experiment, legacy=legacy)
-
-    mask_path = os.path.join(
-            output_directory,
-            "%d_nice_mask.tif" % experiment['id'])
-
-    sitk.WriteImage(
-            sitk.GetImageFromArray(nice_mask.astype(np.uint16)),
-            mask_path.encode('utf-8'))
-
-    experiment['nice_mask_path'] = mask_path
-
-    dict_path = os.path.join(
-            output_directory,
-            "%d_nice_dict.json" % experiment['id'])
-    full_dict = {
-            'experiment': experiment['id'],
-            'mask_path': mask_path,
-            'mask_dict': mask_dict
-            }
-
-    with open(dict_path, 'w') as f:
-        json.dump(full_dict, f, indent=2)
-
-    experiment['nice_dict_path'] = dict_path
-
-    return experiment
 
 
 class NwayMatching(ArgSchemaParser):
@@ -78,14 +42,16 @@ class NwayMatching(ArgSchemaParser):
         with open(input_json, 'r') as f:
             data = json.load(f)
 
-        self.args['output_directory'] = str(data['output_directory'])
+        if self.args['output_directory'] is None:
+            self.args['output_directory'] = str(data['output_directory'])
+
         self.experiments = []
         for exp in data['experiment_containers']['ophys_experiments']:
             self.experiments.append(
-                    create_nice_mask(
+                    utils.create_nice_mask(
                         exp,
                         self.args['output_directory'],
-                        legacy=self.args['legacy']))
+                        legacy_label_order=self.args['legacy_label_order']))
 
         self.expnum = len(self.experiments)
 
@@ -215,7 +181,7 @@ class NwayMatching(ArgSchemaParser):
             for i in range(nline):
                 col = matching_table_nway[i][pcol]
                 row = matching_table_nway[i][prow]
-                if self.args['legacy']:
+                if self.args['legacy_pruning_index_error']:
                     # indexing mistake in original code
                     if col == -1:
                         col = pair.cost_matrix.columns[-2]

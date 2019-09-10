@@ -1,8 +1,69 @@
-import SimpleITK as sitk
 import numpy as np
-from skimage import measure, io
+from skimage import measure
 from skimage.transform import AffineTransform
+import PIL
 import logging
+import os
+import json
+
+
+def create_nice_mask(
+        experiment, output_directory, legacy_label_order=False):
+    """create a labeled mask from the input json experiment and a translation
+    dict to cell IDs, save them to disk, and add their paths to the experiment
+    json.
+
+    Parameters
+    ----------
+    experiment : dict
+        output from segmentation
+        'ophys_average_intensity_projection_image' : str(path)
+        'max_int_mask_image' : str(path)
+            (unused, this function creates unique label mask)
+        'cell_rois' : dict
+        'id' :  str
+        'stimulus_name' : str/Null
+    output_directory : str
+        destination directory for writing masks and translation dicts
+    legacy_label_order : bool
+        passed to labeled_mask_from_experiment()
+
+    Returns
+    -------
+    experiment : dict
+        same as input with 2 additional key/value pairs
+        'nice_mask_path' : str(path)
+        'nice_dict_path' : str(path)
+
+    """
+
+    nice_mask, mask_dict = labeled_mask_from_experiment(
+            experiment, legacy_label_order=legacy_label_order)
+
+    mask_path = os.path.join(
+            output_directory,
+            "%d_nice_mask.tif" % experiment['id'])
+
+    nice_mask = [PIL.Image.fromarray(ix) for ix in nice_mask]
+    nice_mask[0].save(mask_path, save_all=True, append_images=nice_mask[1:])
+
+    experiment['nice_mask_path'] = mask_path
+
+    dict_path = os.path.join(
+            output_directory,
+            "%d_nice_dict.json" % experiment['id'])
+    full_dict = {
+            'experiment': experiment['id'],
+            'mask_path': mask_path,
+            'mask_dict': mask_dict
+            }
+
+    with open(dict_path, 'w') as f:
+        json.dump(full_dict, f, indent=2)
+
+    experiment['nice_dict_path'] = dict_path
+
+    return experiment
 
 
 def relabel(maskimg_3d):
@@ -78,7 +139,7 @@ def row_col_from_roi(roi):
     return masked
 
 
-def labeled_mask_from_experiment(exp, legacy=True):
+def labeled_mask_from_experiment(exp, legacy_label_order=False):
     """create a labeled mask and to-cell-id dictionary
     from the experiment json
 
@@ -106,7 +167,9 @@ def labeled_mask_from_experiment(exp, legacy=True):
         str(label in mask): cell ID
 
     """
-    im = io.imread(exp['ophys_average_intensity_projection_image'])
+    with PIL.Image.open(
+            exp['ophys_average_intensity_projection_image']) as fim:
+        im = np.array(fim)
     imsz = im.shape
     zs = np.unique([r['z'] for r in exp['cell_rois']])
     mask = np.zeros((zs.size, imsz[0], imsz[1])).astype('uint32')
@@ -129,7 +192,7 @@ def labeled_mask_from_experiment(exp, legacy=True):
     # but, some legacy order-dependence with the
     # Hungarian method requires the following ordering
     # Hungarian method is not recommended
-    if legacy:
+    if legacy_label_order:
         relabeled = relabel(relabeled)
         rdict = {}
         for k in np.unique(relabeled)[1:]:
@@ -183,17 +246,11 @@ def read_tiff_3d(filename):
         depth x n x m image
     """
 
-    # TODO
-    # get rid of sitk in favor of skimage
-    img = sitk.ReadImage(filename.encode('utf-8'))
-    dim = img.GetDimension()
+    with PIL.Image.open(filename) as ims:
+        sz = ims.size
+        nframes = ims.n_frames
+        im = np.zeros((nframes, sz[1], sz[0])).astype('uint16')
+        for i, iim in enumerate(PIL.ImageSequence.Iterator(ims)):
+            im[i] = np.array(iim)
 
-    if dim not in [2, 3]:
-        raise ValueError("Error in read_tiff_3d() Image "
-                         "dimension must be 2 or 3.")
-
-    img3d = sitk.GetArrayFromImage(img).astype('int')
-    if dim == 2:
-        img3d = np.expand_dims(img3d, axis=0)
-
-    return img3d
+    return im

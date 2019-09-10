@@ -4,13 +4,11 @@ import subprocess
 import numpy as np
 import pandas as pd
 import json
-from PIL import Image as im
-import SimpleITK as sitk
+import PIL
 import cv2
 import scipy.spatial
 import scipy.optimize
 import networkx as nx
-import re
 import itertools
 from argschema import ArgSchemaParser
 import tempfile
@@ -66,34 +64,35 @@ def gen_assignment_pairs(cost_matrix, solver, hungarian_exe):
                     scipy.optimize.linear_sum_assignment(
                         cost_matrix_array)))
     elif solver == 'Blossom':
-        nrow, ncol = cost_matrix.shape
-        i, j = np.mgrid[0:nrow:1, 0:ncol:1]
+        nrow, ncol = cost_matrix_array.shape
         # Blossom method is max weight, Hungarian is min weight
-        weight = 1.0 / (1.0 + cost_matrix)
-        ind = np.nonzero(weight > 0.002)
-        etuples = [('r_%d' % ii, 'c_%d' % jj, {'weight': ww})
-                   for ii, jj, ww in zip(
-                       i[ind].flatten(),
-                       j[ind].flatten(),
-                       weight[ind].flatten())]
+        weight = 1.0 / (1.0 + cost_matrix_array)
+        ind = np.argwhere(weight > 0.002)
+        etuples = []
+        for i in ind:
+            etuples.append((
+                cost_matrix.index[i[0]],
+                cost_matrix.columns[i[1]],
+                {'weight': weight[i[0], i[1]]}))
+
         G = nx.Graph()
         G.add_edges_from(etuples)
-        k = nx.max_weight_matching(G)
+        pairlabels = list(nx.max_weight_matching(G))
 
-        def get_pair_from_tuple(tup):
-            rs = re.compile("r_(\d+)")
-            cs = re.compile("c_(\d+)")
-            x = " ".join(tup)
-            pair = [
-                    int(rs.search(x).groups()[0]),
-                    int(cs.search(x).groups()[0])]
-            return pair
-        assigned_pairs = [get_pair_from_tuple(ik) for ik in k]
+        # sometimes networkx reverses the order
+        for i in range(len(pairlabels)):
+            if (
+                    (pairlabels[i][0] in cost_matrix.index) &
+                    (pairlabels[i][1] in cost_matrix.columns)):
+                continue
+            else:
+                pairlabels[i] = pairlabels[i][::-1]
 
-    row_lab = cost_matrix.index.tolist()
-    col_lab = cost_matrix.columns.tolist()
-    pairlabels = [[row_lab[pair[0]], col_lab[pair[1]]]
-                  for pair in assigned_pairs]
+    if solver != 'Blossom':
+        row_lab = cost_matrix.index.tolist()
+        col_lab = cost_matrix.columns.tolist()
+        pairlabels = [[row_lab[pair[0]], col_lab[pair[1]]]
+                      for pair in assigned_pairs]
 
     return pairlabels
 
@@ -159,13 +158,22 @@ def gen_matching_table(
     return matches, rejected
 
 
-def region_properties(mask, mdict):
+def region_properties(mask, mdict, integer_centroids=False):
     """Characterize each label region in a mask
 
     Parameters
     ----------
     mask : :class:`numpy.ndarray`
         3D mask image (n x row x column)
+    mdict : dict
+        mapping for mask
+        {
+          "experiment": id of experiment
+          "mask_path": absolute path to mask
+          "mask_dict": {str(intensity): cellid}
+        }
+    integer_centroids : bool
+        force roi centroids to integers
 
     Returns
     -------
@@ -186,10 +194,14 @@ def region_properties(mask, mdict):
         label_locs = np.argwhere(mask == i + 1)
         prop['labels'][i] = mdict['mask_dict'][str(i + 1)]
         if len(label_locs) > 0:
-            # NOTE: the rounding/int-cast here should not be here
-            # leaving it in place for now to preserve legacy
-            prop['centers'][i] = np.round(
-                    label_locs.mean(axis=0)).astype('int')[[-1, -2]]
+            if integer_centroids:
+                # NOTE: the rounding/int-cast here should not be here
+                # leaving it in place for now to preserve legacy
+                prop['centers'][i] = np.round(
+                        label_locs.mean(axis=0)).astype('int')[[-1, -2]]
+            else:
+                prop['centers'][i] = label_locs.mean(axis=0)[[-1, -2]]
+
         prop['pixels'][i] = set([tuple(x) for x in label_locs])
 
     # sometimes a cell ROI gets transformed outside
@@ -204,7 +216,9 @@ def region_properties(mask, mdict):
     return prop
 
 
-def calculate_distance_and_iou(mask1, mask2, dict1, dict2, legacy=False):
+def calculate_distance_and_iou(
+        mask1, mask2, dict1, dict2,
+        integer_centroids=False, iou_rounding=False):
     """Compute distance and intersection-over-union
     for the labels in two masks
 
@@ -223,8 +237,10 @@ def calculate_distance_and_iou(mask1, mask2, dict1, dict2, legacy=False):
         }
     dict2 : dict
         mapping for mask2
-    legacy : bool
-        whether to preserve legacy behavior
+    integer_centroids : bool
+        force roi centroids to integers
+    iou_rounding : bool
+        preserve legacy mistake of ious forced to zero
 
     Returns
     -------
@@ -236,8 +252,10 @@ def calculate_distance_and_iou(mask1, mask2, dict1, dict2, legacy=False):
         intersection-over-union pixel area ratios
 
     """
-    prop1 = region_properties(mask1, dict1)
-    prop2 = region_properties(mask2, dict2)
+    prop1 = region_properties(
+            mask1, dict1, integer_centroids=integer_centroids)
+    prop2 = region_properties(
+            mask2, dict2, integer_centroids=integer_centroids)
 
     # pair-wise distances between cell centers
     distance = scipy.spatial.distance.cdist(
@@ -249,7 +267,7 @@ def calculate_distance_and_iou(mask1, mask2, dict1, dict2, legacy=False):
         for j, jpix in enumerate(prop2['pixels']):
             intersection = len(ipix.intersection(jpix))
             union = len(ipix.union(jpix))
-            if legacy:
+            if iou_rounding:
                 # NOTE
                 # the orginal was written in python 2 and
                 # the IOU calculation almost always gave 0 :(
@@ -296,7 +314,7 @@ def calculate_cost_matrix(distance, iou, maximum_distance):
 
 def cell_matching(
         mask1, mask2, dict1, dict2, max_dist, solver, hungarian_exe,
-        legacy=False):
+        integer_centroids=False, iou_rounding=False):
     """matching between 2 masks
 
     Parameters
@@ -324,8 +342,10 @@ def cell_matching(
        one of "Hungarian-cpp", "Hungarian" (scipy), or "Blossom"
     hungarian_exe : str
        absolute path to compiled Hungarian executable
-    legacy : bool
-        whether to preserve legacy behavior
+    integer_centroids : bool
+        force roi centroids to integers
+    iou_rounding : bool
+        preserve legacy mistake of ious forced to zero
 
     Returns
     -------
@@ -349,7 +369,9 @@ def cell_matching(
     """
 
     distance, iou = calculate_distance_and_iou(
-        mask1, mask2, dict1, dict2, legacy=legacy)
+        mask1, mask2, dict1, dict2,
+        integer_centroids=integer_centroids,
+        iou_rounding=iou_rounding)
 
     cost_matrix = calculate_cost_matrix(distance, iou, max_dist)
 
@@ -445,8 +467,10 @@ def register_intensity_images(
             "MOTION_HOMOGRAPHY": cv2.MOTION_HOMOGRAPHY}
 
     # read average intensity images
-    img_fixed = np.array(im.open(img_path_fixed))
-    img_moving = np.array(im.open(img_path_moving))
+    with PIL.Image.open(img_path_fixed) as im:
+        img_fixed = np.array(im)
+    with PIL.Image.open(img_path_moving) as im:
+        img_moving = np.array(im)
 
     # Define termination criteria
     criteria = (
@@ -516,9 +540,8 @@ class PairwiseMatching(ArgSchemaParser):
             imfname = os.path.join(
                 self.args['output_directory'],
                 'register_%s_to_%s.tif' % (moving_strid, fixed_strid))
-            sitk.WriteImage(
-                sitk.GetImageFromArray(moving_warped),
-                imfname.encode('utf-8'))
+            with PIL.Image.fromarray(moving_warped) as im:
+                im.save(imfname)
 
         segmask_fixed_3d = utils.read_tiff_3d(
                 self.args['fixed']['nice_mask_path'])
@@ -545,7 +568,8 @@ class PairwiseMatching(ArgSchemaParser):
                     self.args['maximum_distance'],
                     self.args['assignment_solver'],
                     self.args['hungarian_executable'],
-                    legacy=self.args['legacy'])
+                    integer_centroids=self.args['integer_centroids'],
+                    iou_rounding=self.args['iou_rounding'])
 
         output_json = {
                 'matches': self.matches,
