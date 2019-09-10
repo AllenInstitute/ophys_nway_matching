@@ -1,5 +1,5 @@
 import pytest
-from nway.nway_matching_main import NwayMatching
+from nway.nway_matching import NwayMatching
 import os
 from jinja2 import Template
 import json
