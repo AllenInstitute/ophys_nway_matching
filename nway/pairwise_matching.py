@@ -496,7 +496,12 @@ def register_intensity_images(
             img_path_moving))
         raise
 
-    img_moving_warped = cv2.warpAffine(
+    if motion_type == 'MOTION_HOMOGRAPHY':
+        warp = cv2.warpPerspective
+    else:
+        warp = cv2.warpAffine
+
+    img_moving_warped = warp(
             img_moving,
             tform,
             img_fixed.shape[::-1],
@@ -587,6 +592,6 @@ class PairwiseMatching(ArgSchemaParser):
         return
 
 
-if __name__ == "__main__":
+if __name__ == "__main__":  # pragma: no cover
     pmod = PairwiseMatching()
     pmod.run()

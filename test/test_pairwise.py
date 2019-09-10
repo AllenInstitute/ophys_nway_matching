@@ -5,8 +5,10 @@ import os
 from jinja2 import Template
 import json
 import itertools
+import cv2
+import PIL
 import nway.utils as utils
-from nway.pairwise_matching import gen_assignment_pairs, PairwiseMatching
+import nway.pairwise_matching as pairwise
 
 TEST_FILE_DIR = os.path.join(
         os.path.dirname(os.path.abspath(__file__)),
@@ -76,7 +78,7 @@ def test_solvers_easy(solver, shuffle, niter):
         if shuffle:
             cost = shuffle_dataframe(cost)
 
-        pairs = gen_assignment_pairs(cost, solver, cppexe)
+        pairs = pairwise.gen_assignment_pairs(cost, solver, cppexe)
 
         test_sets.append(set([tuple(i) for i in pairs]))
 
@@ -117,7 +119,7 @@ def test_real_cost_data(input_file, tmpdir, solver):
                     "{}_to_{}_output.json".format(moving['id'], fixed['id']))
             }
 
-    pm = PairwiseMatching(input_data=pair_args, args=[])
+    pm = pairwise.PairwiseMatching(input_data=pair_args, args=[])
     pm.run()
 
     cost = pm.cost_matrix
@@ -131,7 +133,7 @@ def test_real_cost_data(input_file, tmpdir, solver):
     for i in range(100):
         cost = shuffle_dataframe(cost)
 
-        pairs = gen_assignment_pairs(cost, solver, cppexe)
+        pairs = pairwise.gen_assignment_pairs(cost, solver, cppexe)
         test_sets.append(set([tuple(i) for i in pairs]))
 
     combos = np.array([
@@ -142,3 +144,191 @@ def test_real_cost_data(input_file, tmpdir, solver):
         assert combos.mean() < 0.85
     else:
         assert combos.mean() > 0.95
+
+
+def test_gen_matching_table():
+    nrow = 10
+    ncol = 15
+    rows = ['r_%d' % i for i in range(nrow)]
+    cols = ['c_%d' % i for i in range(ncol)]
+    high_cost = 1000.0
+    low_cost = 1.0
+    cost_arr = np.ones((nrow, ncol)) * high_cost
+    for i in range(nrow):
+        cost_arr[i, i] = low_cost
+    cost = pd.DataFrame(cost_arr, rows, cols)
+
+    validation_pairs = read_pairs_from_simple(cost, low_cost)
+
+    distance = pd.DataFrame(np.ones(cost_arr.shape) * 1000, rows, cols)
+    iou = pd.DataFrame(np.random.randn(*cost_arr.shape), rows, cols)
+
+    for pair in validation_pairs:
+        distance[pair[1]][pair[0]] = 1.234
+        iou[pair[1]][pair[0]] = 5.678
+
+    # this pair will not be in matches, but in rejected
+    # it is below the distance threshold, but it does not
+    # show up in the validation_pairs list
+    rej_pair = ['r_9', 'c_11']
+    distance[rej_pair[1]][rej_pair[0]] = 1.234
+
+    matches, rejected = pairwise.gen_matching_table(
+            cost, validation_pairs, distance, iou, 10.0)
+
+    valsets = set([tuple(i) for i in validation_pairs])
+    msets = set([(m['fixed'], m['moving']) for m in matches])
+    assert valsets == msets
+    mdists = np.array([m['distance'] for m in matches])
+    assert np.all(np.isclose(mdists, 1.234))
+    mious = np.array([m['iou'] for m in matches])
+    assert np.all(np.isclose(mious, 5.678))
+
+    rvalsets = set([tuple(i) for i in [rej_pair]])
+    rmsets = set([(m['fixed'], m['moving']) for m in rejected])
+    assert rvalsets == rmsets
+    assert np.isclose(rejected[0]['distance'], 1.234)
+
+
+@pytest.mark.parametrize('integer_centroids', [True, False])
+def test_region_properties(integer_centroids):
+    mask = np.zeros((3, 100, 100)).astype('uint16')
+    mask[0, 40:50, 40:50] = 1
+    i1 = np.argwhere(mask[0] == 1)
+    mask[1, 60:65, 30:35] = 2
+    i2 = np.argwhere(mask[1] == 2)
+    mdict = {
+            'mask_dict': {
+                "1": 123456,
+                "2": 789012,
+                }
+            }
+
+    prop = pairwise.region_properties(
+            mask, mdict, integer_centroids=integer_centroids)
+
+    assert prop['centers'].shape == (2, 2)
+    if integer_centroids:
+        ic1 = np.round(i1.mean(axis=0))[::-1]
+        ic2 = np.round(i2.mean(axis=0))[::-1]
+    else:
+        ic1 = i1.mean(axis=0)[::-1]
+        ic2 = i2.mean(axis=0)[::-1]
+    assert np.all(np.isclose(
+        prop['centers'],
+        np.array([ic1, ic2])))
+
+
+@pytest.mark.parametrize('iou_rounding', [True, False])
+@pytest.mark.parametrize('integer_centroids', [True, False])
+def test_calc_distance_iou(iou_rounding, integer_centroids):
+    mask1 = np.zeros((3, 100, 100)).astype('uint16')
+    mask1[0, 40:50, 40:50] = 1
+    mask1[1, 60:65, 30:35] = 2
+    dict1 = {
+            'mask_dict': {
+                "1": 123456,
+                "2": 789012,
+                }
+            }
+    mask2 = np.zeros((3, 100, 100)).astype('uint16')
+    mask2[0, 38:50, 45:50] = 1
+    mask2[1, 63:70, 30:35] = 2
+    dict2 = {
+            'mask_dict': {
+                "1": 987654,
+                "2": 321987,
+                "3": 100000
+                }
+            }
+
+    distance, iou = pairwise.calculate_distance_and_iou(
+            mask1,
+            mask2,
+            dict1,
+            dict2,
+            integer_centroids=integer_centroids,
+            iou_rounding=iou_rounding)
+
+    assert set(distance.columns.tolist()) == set(dict2['mask_dict'].values())
+    assert set(distance.index.tolist()) == set(dict1['mask_dict'].values())
+    assert set(iou.columns.tolist()) == set(dict2['mask_dict'].values())
+    assert set(iou.index.tolist()) == set(dict1['mask_dict'].values())
+
+
+def test_calculate_cost_matrix():
+    nrow = 10
+    ncol = 15
+    rows = ['r_%d' % i for i in range(nrow)]
+    cols = ['c_%d' % i for i in range(ncol)]
+    darr = np.random.rand(nrow, ncol) * 100
+    distance = pd.DataFrame(darr, rows, cols)
+    iarr = np.ones((nrow, ncol)) * 0.5
+    iou = pd.DataFrame(iarr, rows, cols)
+
+    cost = pairwise.calculate_cost_matrix(distance, iou, 10)
+    assert np.all(cost.columns.tolist() == distance.columns.tolist())
+    assert np.all(cost.index.tolist() == distance.index.tolist())
+
+    carr = np.array(cost)
+
+    ind = darr > 10
+    assert np.all(carr[ind] == 999.5)
+    ind = darr <= 10
+    assert np.all(carr[ind] == (darr[ind]/10 + 0.5))
+
+
+@pytest.mark.parametrize('motion', ['MOTION_AFFINE', 'MOTION_HOMOGRAPHY'])
+def test_register(input_file, tmpdir, motion):
+    with open(input_file, 'r') as f:
+        j = json.load(f)
+    impath = (
+            j['experiment_containers']
+            ['ophys_experiments'][0]
+            ['ophys_average_intensity_projection_image'])
+    with PIL.Image.open(impath) as im:
+        imfixed = np.array(im)
+
+    tform = np.array([
+        [0.9, 0.1, 23],
+        [-0.05, 1.02, -34],
+        [0, 0, 1]])
+    immoving = cv2.warpPerspective(
+            imfixed,
+            tform,
+            imfixed.shape[::-1])
+
+    output_dir = str(tmpdir.mkdir("register_test"))
+    fname = os.path.join(output_dir, 'fixed.tif')
+    mname = os.path.join(output_dir, 'moving.tif')
+
+    with PIL.Image.fromarray(immoving) as im:
+        im.save(mname)
+    with PIL.Image.fromarray(imfixed) as im:
+        im.save(fname)
+
+    new_tform, warped = pairwise.register_intensity_images(
+            fname,
+            mname,
+            1000,
+            1.5e-7,
+            motion)
+
+    # is the affine transform pretty close to what we put in?
+    assert np.all(np.isclose(tform[0:2, 0:2], new_tform[0:2, 0:2], atol=0.005))
+    # are the translations pretty close to what we put in?
+    assert np.all(np.isclose(tform[:, 2], new_tform[:, 2], atol=1.0))
+
+    # can't align one random image
+    if motion == 'MOTION_AFFINE':
+        randim = np.uint8(np.zeros(imfixed.shape))
+        rname = os.path.join(output_dir, 'random.tif')
+        with PIL.Image.fromarray(randim) as im:
+            im.save(rname)
+        with pytest.raises(cv2.error):
+            new_tform, warped = pairwise.register_intensity_images(
+                    fname,
+                    rname,
+                    1000,
+                    1.5e-7,
+                    motion)

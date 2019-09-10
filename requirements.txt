@@ -1,4 +1,3 @@
-simpleitk
 argschema<2.0
 numpy
 pillow
