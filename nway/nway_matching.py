@@ -30,6 +30,58 @@ class NwayException(Exception):
     pass
 
 
+def prune_matching_table_legacy(matching_table_nway, score):
+
+    linenum = np.shape(matching_table_nway)[0]
+    expnum = np.shape(matching_table_nway)[1]
+    matching_table_nway_new = []
+
+    # if two records share common elements in the
+    # same column, then create an edge between them
+    edge = np.zeros((linenum, linenum))
+    node_exist = np.ones(linenum)
+    
+    for i in range(linenum - 1):  # start from the second line
+        for j in range(i + 1, linenum):
+            for k in range(expnum):
+                if (
+                       (matching_table_nway[j][k] ==
+                           matching_table_nway[i][k]) and
+                       (matching_table_nway[i][k] != -1) and
+                       (matching_table_nway[j][k] != -1)):
+                    edge[i, j] = 1
+                    break
+    
+    labelval = 0
+    for i in range(linenum):
+        if node_exist[i] == 1:
+            idx = np.argwhere(edge[i, :] == 1)
+            len_idx = len(idx)
+            if len_idx == 0:  # no conflict with other matching
+                labelval = labelval + 1
+                this_record = np.append(matching_table_nway[i], labelval)
+                matching_table_nway_new.append(this_record)
+
+            # score is the smallest, equal may lead
+            # to conflict matching added to the list?
+            elif score[i] <= np.min(score[idx]):
+                labelval = labelval + 1
+                this_record = np.append(matching_table_nway[i], labelval)
+                matching_table_nway_new.append(this_record.astype(int))
+
+                # remove the nodes connected to it
+                # as they have worse scores
+                edge[i, idx] = 0
+                for k in range(len_idx):
+                    edge[idx[k], :] = 0
+                node_exist[idx] = 0
+
+            else:  # prune the edge
+                edge[i, idx] = 0
+
+    return matching_table_nway_new
+
+
 class NwayMatching(ArgSchemaParser):
     default_schema = NwayMatchingSchema
     default_output_schema = NwayMatchingOutputSchema
@@ -196,46 +248,33 @@ class NwayMatching(ArgSchemaParser):
                         pscore = 1000
                 score[i] += pscore
 
-        # define a graph with a node for each line in the table
-        # and the score as an attribute
-        G = nx.Graph()
-        for i in range(nline):
-            G.add_node(i, score=score[i])
+        if self.args['legacy_pruning_order_dependence']:
+            matching_table_nway_new = prune_matching_table_legacy(
+                    matching_table_nway, score)
 
-        # if any 2 lines share an entry, make an edge between them
-        edge = np.zeros((nline, nline))
-        for (i0, line0), (i1, line1) in itertools.combinations(
-                enumerate(matching_table_nway), 2):
-            nz = (line0 != -1) & (line1 != -1)
-            if np.any(line0[nz] == line1[nz]):
-                G.add_edge(i0, i1)
-                edge[i0, i1] = 1
+        else:
+            # define a graph with a node for each line in the table
+            # and the score as an attribute
+            G = nx.Graph()
+            for i in range(nline):
+                # float cast here temporarily to debug and store graph as graphml
+                # not necessary except for this known bug
+                # https://github.com/networkx/networkx/issues/1556
+                G.add_node(i, score=float(score[i]))
 
-        # NOTE
-        # this is the original logic, rewritten using networkx graph
-        # rather than the custom graph, to be more readable.
-        # this logic is order-dependent!
-        matching_table_nway_new = []
-        nodes = list(G.nodes())
-        for node in nodes:
-            if node in G.nodes():
-                neighbors = nx.neighbors(G, node)
-                neighbor_scores = [G.nodes()[n]['score'] for n in neighbors]
-                node_score = G.nodes()[node]['score']
-                if np.all(node_score <= neighbor_scores):
-                    # if a node has the lowest score of any of its neighbors
-                    # remove the neighbors
-                    [G.remove_node(n) for n in enumerate(neighbors)]
-                else:
-                    # otherwise, remove the node
-                    G.remove_node(node)
+            # if any 2 lines share an entry, make an edge between them
+            for (i0, line0), (i1, line1) in itertools.combinations(
+                    enumerate(matching_table_nway), 2):
+                nz = (line0 != -1) & (line1 != -1)
+                if np.any(line0[nz] == line1[nz]):
+                    G.add_edge(i0, i1)
 
-        # any remaining nodes are lines for the pruned table
-        labelval = 0
-        for node in G.nodes():
-            this_record = np.append(matching_table_nway[node], labelval)
-            matching_table_nway_new.append(this_record.astype('int'))
-            labelval += 1
+            # any remaining nodes are lines for the pruned table
+            labelval = 0
+            for node in G.nodes():
+                this_record = np.append(matching_table_nway[node], labelval)
+                matching_table_nway_new.append(this_record.astype('int'))
+                labelval += 1
 
         return matching_table_nway_new
 
