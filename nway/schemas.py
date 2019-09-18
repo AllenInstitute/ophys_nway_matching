@@ -145,6 +145,15 @@ class NwayMatchingSchema(CommonMatchingSchema):
         default=False,
         missing=False,
         description="preserve index error in nway-pruning")
+    pruning_method = Str(
+        required=False,
+        missing="keepmin",
+        default="keepmin",
+        description=("method for reducing pruning graph: "
+                     "'keepmin': similar to original, delete from "
+                     "    graph neighbors of lowest subgraph score."
+                     "'popmax': delete highest scores of subgraphs "
+                     "    recursively"))
 
     @mm.pre_load
     def set_nway_legacy(self, data):

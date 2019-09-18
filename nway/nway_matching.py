@@ -31,7 +31,22 @@ class NwayException(Exception):
 
 
 def prune_matching_table_legacy(matching_table_nway, score):
+    """eliminates match conflicts by comparing scores
 
+    Parameters
+    ----------
+    table : list
+        list (len = n_match_candidates) of numpy arrays (size = n_experiment)
+        containing either cellIDs or -1
+    score : :class:`numpy.ndarray`
+        size = n_match_candidates, a float score value for each candidat
+
+    Returns
+    -------
+    pruned : list
+        pruned version of the input table
+
+    """
     linenum = np.shape(matching_table_nway)[0]
     expnum = np.shape(matching_table_nway)[1]
     matching_table_nway_new = []
@@ -40,7 +55,7 @@ def prune_matching_table_legacy(matching_table_nway, score):
     # same column, then create an edge between them
     edge = np.zeros((linenum, linenum))
     node_exist = np.ones(linenum)
-    
+
     for i in range(linenum - 1):  # start from the second line
         for j in range(i + 1, linenum):
             for k in range(expnum):
@@ -51,7 +66,7 @@ def prune_matching_table_legacy(matching_table_nway, score):
                        (matching_table_nway[j][k] != -1)):
                     edge[i, j] = 1
                     break
-    
+
     labelval = 0
     for i in range(linenum):
         if node_exist[i] == 1:
@@ -59,15 +74,13 @@ def prune_matching_table_legacy(matching_table_nway, score):
             len_idx = len(idx)
             if len_idx == 0:  # no conflict with other matching
                 labelval = labelval + 1
-                this_record = np.append(matching_table_nway[i], labelval)
-                matching_table_nway_new.append(this_record)
+                matching_table_nway_new.append(matching_table_nway[i])
 
             # score is the smallest, equal may lead
             # to conflict matching added to the list?
             elif score[i] <= np.min(score[idx]):
                 labelval = labelval + 1
-                this_record = np.append(matching_table_nway[i], labelval)
-                matching_table_nway_new.append(this_record.astype(int))
+                matching_table_nway_new.append(matching_table_nway[i])
 
                 # remove the nodes connected to it
                 # as they have worse scores
@@ -80,6 +93,99 @@ def prune_matching_table_legacy(matching_table_nway, score):
                 edge[i, idx] = 0
 
     return matching_table_nway_new
+
+
+def subgraphs(G):
+    """returns connected component subgraphs. Replaces deprecated
+    nx.connected_component_subgraphs()
+
+    Parameters
+    ----------
+    G : :class:`networkx.Graph`
+
+    Returns
+    -------
+    subgs : tuple
+        tuple of connected subgraphs of G
+
+    """
+    subgs = (G.subgraph(c).copy() for c in nx.connected_components(G))
+    return subgs
+
+
+def greduce(glist, method='keepmin'):
+    """recursively reduces a graph according to node attribute 'score'
+
+    Parameters
+    ----------
+    glist : tuple
+        tuple of subgraphs
+    method : str
+        'keepmin' reduce graph by finding the minimum score of a subraph
+            and eliminating its neighbors
+        'popmax' reduce graph by finding the maximum score and eliminating it
+
+    Returns
+    -------
+    results : list
+        list of nodes that survive the pruning
+
+    """
+    results = []
+    for g in glist:
+        gnodes = list(g.nodes.keys())
+        if len(gnodes) == 1:
+            results += [gnodes[0]]
+        else:
+            if method == 'popmax':
+                maxind = np.argmax([i['score'] for i in g.nodes.values()])
+                g.remove_node(gnodes[maxind])
+            elif method == 'keepmin':
+                minind = np.argmin([i['score'] for i in g.nodes.values()])
+                neighbors = list(g.neighbors(gnodes[minind]))
+                for n in neighbors:
+                    g.remove_node(n)
+            results += greduce(subgraphs(g), method=method)
+
+    return results
+
+
+def prune_matching_table(table, score, method='keepmin'):
+    """eliminates match conflicts by comparing scores
+
+    Parameters
+    ----------
+    table : list
+        list (len = n_match_candidates) of numpy arrays (size = n_experiment)
+        containing either cellIDs or -1
+    score : :class:`numpy.ndarray`
+        size = n_match_candidates, a float score value for each candidat
+    method : str
+        'keepmin' reduce graph by finding the minimum score of a subraph
+            and eliminating its neighbors
+        'popmax' reduce graph by finding the maximum score and eliminating it
+
+    Returns
+    -------
+    pruned : list
+        pruned version of the input table
+
+    """
+    G = nx.Graph()
+    for i in range(len(table)):
+        G.add_node(i, score=score[i])
+
+    # if any 2 lines share an entry, make an edge between them
+    for (i0, line0), (i1, line1) in itertools.combinations(
+            enumerate(table), 2):
+        nz = (line0 != -1) & (line1 != -1)
+        if np.any(line0[nz] == line1[nz]):
+            G.add_edge(i0, i1)
+
+    inds = greduce(subgraphs(G), method=method)
+    pruned = [table[i] for i in inds]
+
+    return pruned
 
 
 class NwayMatching(ArgSchemaParser):
@@ -116,8 +222,8 @@ class NwayMatching(ArgSchemaParser):
     def gen_nway_table_with_redundancy(self):
         """Combine all pairwise matches into one table
         regardless of conflicts.
-        """
 
+        """
         matching_frame = pd.DataFrame(
             columns=[e['id'] for e in self.experiments])
 
@@ -135,9 +241,19 @@ class NwayMatching(ArgSchemaParser):
 
     @staticmethod
     def remove_nway_table_redundancy(frame):
-        '''Remove redundancy from the matching table. Redundancy include lines
-           that are the same or one is the subset of another.
-        '''
+        """Remove any matching lines or subsets in a table
+
+        Parameters
+        ----------
+        frame : :class:`pandas.DataFrame` or :class:`numpy.ndarray`
+            table of cellIDs or zeros
+
+        Returns
+        -------
+        table_new : list
+            list of lines without redundancy or subsets
+
+        """
 
         table = np.array(frame).astype('float')
         table[np.isnan(table)] = -1
@@ -189,13 +305,20 @@ class NwayMatching(ArgSchemaParser):
         return table_new
 
     def prune_matching_graph(self, matching_table_nway):
-        ''' Prune matching graph to remove matching conflicts.
-            This is achieved by creating a graph. Each matching line
-            is a node in the graph. An edge indicates conflict
-            between matchings respresented by the two nodes. The
-            final result is obtained by pruning the graph based on weight
-            matrix computed earlier.
-        '''
+        """remove matching conflicts by scoring match candidates
+        and pruning according to that score
+
+        Parameters
+        ----------
+        matching_table_nway : list
+            list of match arrays
+
+        Returns
+        -------
+        matching_table_nway_new : list
+            pruned list of match arrays
+
+        """
 
         nline = np.shape(matching_table_nway)[0]
 
@@ -251,35 +374,26 @@ class NwayMatching(ArgSchemaParser):
         if self.args['legacy_pruning_order_dependence']:
             matching_table_nway_new = prune_matching_table_legacy(
                     matching_table_nway, score)
-
         else:
-            # define a graph with a node for each line in the table
-            # and the score as an attribute
-            G = nx.Graph()
-            for i in range(nline):
-                # float cast here temporarily to debug and store graph as graphml
-                # not necessary except for this known bug
-                # https://github.com/networkx/networkx/issues/1556
-                G.add_node(i, score=float(score[i]))
-
-            # if any 2 lines share an entry, make an edge between them
-            for (i0, line0), (i1, line1) in itertools.combinations(
-                    enumerate(matching_table_nway), 2):
-                nz = (line0 != -1) & (line1 != -1)
-                if np.any(line0[nz] == line1[nz]):
-                    G.add_edge(i0, i1)
-
-            # any remaining nodes are lines for the pruned table
-            labelval = 0
-            for node in G.nodes():
-                this_record = np.append(matching_table_nway[node], labelval)
-                matching_table_nway_new.append(this_record.astype('int'))
-                labelval += 1
+            matching_table_nway_new = prune_matching_table(
+                    matching_table_nway, score, self.args['pruning_method'])
 
         return matching_table_nway_new
 
     def add_remaining_cells(self, matching_table_nway):
-        ''' Add remaining cells that do not find matches into the table.'''
+        """add any remaining cells that had no match
+
+        Parameters
+        ----------
+        matching_table_nway : list
+            list of match arrays
+
+        Returns
+        -------
+        matching_table_nway_new : list
+            with added unmatched cells
+
+        """
 
         linenum = np.shape(matching_table_nway)[0]
         cnt = linenum
@@ -296,28 +410,21 @@ class NwayMatching(ArgSchemaParser):
             num = len(label_remain[i])
             for j in range(num):
                 cnt = cnt + 1
-                this_record = np.zeros(len(self.experiments) + 1) - 1
+                this_record = np.zeros(len(self.experiments)) - 1
                 this_record[i] = label_remain[i][j]
-                this_record[len(self.experiments)] = cnt
                 matching_table_nway_new.append(this_record.astype(int))
 
         return matching_table_nway_new
 
-    def write_matching_table(self):
-        ''' Write the final matching table that include all the cells in N sessions.
-            Each row is one matching. It has N+1 entries. -1 means no match.
-            The last entry is the unified label of the cells.'''
-        filename_matching_table = os.path.join(
-            self.args['output_directory'], 'matching_result.txt')
-        np.savetxt(
-                filename_matching_table,
-                self.matching_table_nway,
-                delimiter=' ',
-                fmt='%d')
-
     def create_output_json(self):
-        ''' Write the matching result into output json file. '''
+        """write the nway matching results to a dict
 
+        Returns
+        -------
+        matchingdata: dict
+           "nway_matches": list of sets of cellID matches
+           "pairwise_results": list of results from the pairwise matching
+        """
         cellnum = np.shape(self.matching_table_nway)[0]
         matchingdata = dict()
         matchingdata["nway_matches"] = []
@@ -331,7 +438,7 @@ class NwayMatching(ArgSchemaParser):
             logger.debug(self.matching_table_nway[i])
 
         for i in range(cellnum):
-            thisrgn = [v for v in self.matching_table_nway[i][:-1] if v != -1]
+            thisrgn = [v for v in self.matching_table_nway[i] if v != -1]
 
             if len(thisrgn) > 0:
                 matchingdata["nway_matches"].append(thisrgn)
@@ -346,9 +453,12 @@ class NwayMatching(ArgSchemaParser):
 
         return matchingdata
 
-    def match_nway(self, para):
-        '''Nway cell matching by calling pairwise
-           matching and then combining the results'''
+    def run(self):
+        """Nway cell matching by calling pairwise
+           matching and then combining the results
+        """
+
+        self.parse_jsons(self.args['input_json'])
 
         # pair-wise matching
         self.pair_matches = []
@@ -375,26 +485,11 @@ class NwayMatching(ArgSchemaParser):
         self.matching_table_nway = self.add_remaining_cells(
                 matching_table_nway_tmp)
 
-        return
-
-    def run(self):
-        ''' Main function of nway cell matching across multiple ophys sessions.
-            The method takes three step:
-            1) Image registration;
-            2) Pairwise matching;
-            3) Combining pairwise matching to generate Nway result.
-        '''
-
-        self.parse_jsons(self.args['input_json'])
-
-        self.match_nway(self.args)
         logger.info("Nway matching is done!")
-
-        self.write_matching_table()
-        logger.info("Matching table is written!")
 
         output_json = self.create_output_json()
         self.output(output_json, indent=2)
+        logger.info("wrote {}".format(self.args['output_json']))
 
 
 if __name__ == "__main__":  # pragma: no cover
