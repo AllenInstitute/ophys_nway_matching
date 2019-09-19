@@ -2,7 +2,8 @@ from argschema.schemas import DefaultSchema
 from argschema import ArgSchema
 from argschema.fields import (
         Boolean, Int, Str, Float, Dict,
-        List, InputFile, OutputDir, Nested)
+        List, InputFile, OutputDir, Nested,
+        OutputFile, Bool)
 import marshmallow as mm
 import logging
 
@@ -204,3 +205,14 @@ class PairwiseOutputSchema(DefaultSchema):
         Dict,
         required=True,
         description="pairs within max_distance, but not matched")
+
+
+class NwayDiagnosticSchema(ArgSchema):
+    output_pdf = OutputFile(
+        required=True,
+        description="path to output pdf")
+    use_input_dir = Bool(
+        required=False,
+        missing=False,
+        default=False,
+        descriptip="output to same directory as input")

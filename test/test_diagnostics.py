@@ -4,6 +4,7 @@ import matplotlib.gridspec as gridspec
 import nway.diagnostics as nwdi
 import os
 import PyPDF2
+import shutil
 
 TEST_FILE_DIR = os.path.join(
         os.path.dirname(os.path.abspath(__file__)),
@@ -80,3 +81,37 @@ def test_plot_all(new_output, tmpdir):
     nwdi.plot_all(new_output, fname)
     assert os.path.isfile(fname)
     PyPDF2.PdfFileReader(fname)
+
+
+def test_NwayDiagnostics(new_output, tmpdir):
+    output_dir = str(tmpdir.mkdir("diagnostic_test"))
+    fname = os.path.join(
+            output_dir,
+            "output2.pdf")
+
+    args = {
+            'input_json': new_output,
+            'output_pdf': fname}
+
+    nd = nwdi.NwayDiagnostics(input_data=args, args=[])
+    nd.run()
+    assert os.path.isfile(fname)
+    PyPDF2.PdfFileReader(fname)
+
+    ninput = os.path.join(
+            output_dir,
+            "tmpinput.json")
+
+    shutil.copy(new_output, ninput)
+    args = {
+            'input_json': ninput,
+            'output_pdf': "tmp.pdf",
+            'use_input_dir': True}
+    nd = nwdi.NwayDiagnostics(input_data=args, args=[])
+    nd.run()
+
+    oname = os.path.join(
+            output_dir,
+            os.path.basename(args['output_pdf']))
+    assert os.path.isfile(oname)
+    PyPDF2.PdfFileReader(oname)
