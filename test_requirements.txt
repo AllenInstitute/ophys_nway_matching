@@ -8,3 +8,4 @@ pytest-xdist>=1.14
 flake8>=3.0.4
 pylint>=1.5.4
 jinja2>=2.2.10
+pypdf2>=1.26.0
