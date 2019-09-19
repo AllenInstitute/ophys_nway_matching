@@ -1,710 +1,598 @@
-# -*- coding: utf-8 -*-
-"""
-
-Pair-wise matching called by nway matching main function
-
-Copyright (c) Allen Institute for Brain Science
-"""
 import os
 import logging
 import subprocess
-import shlex
 import numpy as np
-from PIL import Image as im
-from skimage import measure as ms
-import matplotlib.pyplot as plt
-import SimpleITK as sitk
+import pandas as pd
+import json
+import PIL
 import cv2
+import scipy.spatial
+import scipy.optimize
+import networkx as nx
+import itertools
+from argschema import ArgSchemaParser
+import tempfile
 
-import nway.region_properties as rp
+from nway.schemas import PairwiseMatchingSchema, PairwiseOutputSchema
+import nway.utils as utils
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
-plt.ion()
+
+def gen_assignment_pairs(cost_matrix, solver, hungarian_exe):
+    """generate pairs via an assignment problem solver
+
+    Parameters
+    ----------
+    cost_matrix : :class:`pandas.DataFrame`
+        index = labels1, columns = labels2
+        N x M calculated cost matrix
+    solver : str
+       one of "Hungarian-cpp", "Hungarian" (scipy), or "Blossom"
+    hungarian_exe : str
+       absolute path to compiled Hungarian executable
+
+    Returns
+    -------
+    pairlabels : list
+        pairs of labels [label from row (index), label from column]
+        that are the assigned matches
+
+    """
+
+    cost_matrix_array = np.array(cost_matrix)
+
+    if solver == 'Hungarian-cpp':
+        infile = tempfile.NamedTemporaryFile(delete=False).name
+        outfile = tempfile.NamedTemporaryFile(delete=False).name
+        np.savetxt(infile, cost_matrix_array, delimiter=' ')
+        cpp_args = [
+                hungarian_exe,
+                infile,
+                str(cost_matrix_array.shape[0]),
+                str(cost_matrix_array.shape[1]),
+                outfile]
+        subprocess.check_call(cpp_args)
+        assigned_pairs = np.loadtxt(
+                outfile, delimiter=' ').astype('int')
+        [os.remove(i) for i in [infile, outfile] if os.path.isfile(i)]
+
+    elif solver == 'Hungarian':
+        assigned_pairs = np.transpose(
+                np.array(
+                    scipy.optimize.linear_sum_assignment(
+                        cost_matrix_array)))
+    elif solver == 'Blossom':
+        nrow, ncol = cost_matrix_array.shape
+        # Blossom method is max weight, Hungarian is min weight
+        weight = 1.0 / (1.0 + cost_matrix_array)
+        ind = np.argwhere(weight > 0.002)
+        etuples = []
+        for i in ind:
+            etuples.append((
+                cost_matrix.index[i[0]],
+                cost_matrix.columns[i[1]],
+                {'weight': weight[i[0], i[1]]}))
+
+        G = nx.Graph()
+        G.add_edges_from(etuples)
+        nxresults = nx.max_weight_matching(G)
+        pairlabels = list([list(i) for i in nxresults])
+
+        # sometimes networkx reverses the order
+        for i in range(len(pairlabels)):
+            if (
+                    (pairlabels[i][0] in cost_matrix.index) &
+                    (pairlabels[i][1] in cost_matrix.columns)):
+                continue
+            else:
+                pairlabels[i] = pairlabels[i][::-1]
+
+    if solver != 'Blossom':
+        row_lab = cost_matrix.index.tolist()
+        col_lab = cost_matrix.columns.tolist()
+        pairlabels = [[row_lab[pair[0]], col_lab[pair[1]]]
+                      for pair in assigned_pairs]
+
+    return pairlabels
 
 
-def sitk2numpyarray(array_sitk):
-    ''' Convert sitk array to numpy array. '''
+def gen_matching_table(
+        cost_matrix, assigned_pairs, distance, iou, max_distance):
+    """generate rich summary of the matched pairs
 
-    dim = np.shape(array_sitk)
+    Parameters
+    ----------
+    cost_matrix : :class:`pandas.DataFrame`
+        index = labels1, columns = labels2
+        N x M calculated cost matrix
+    assigned_pairs : list
+        pairs of labels [label from row (index), label from column]
+        that are the assigned matches
+    distance : :class:`pandas.DataFrame`
+        index = labels1, columns = labels2
+        Euclidean distance of centers
+    iou : :class:`pandas.DataFrame`
+        index = labels1, columns = labels2
+        intersection-over-union pixel area ratios
+    maximum_distance : Int
+        threshold beyond which a large cost
+        will be incurred
 
-    if len(dim) == 3:
-        dep, col, row = np.shape(array_sitk)
-        array_np = np.zeros((dep, row, col), dtype=np.int)
-        for i in range(dep):
-            array_np[i, :, :] = array_sitk[i, :, :].T
-    elif len(dim) == 2:
-        array_np = array_sitk.T
-    else:
-        logger.error("Error in converting sitk array to numpy array. "
-                     "Image should be either 2D or 3D.")
-        return
+    Returns
+    -------
+    matches : list of dict
+        list of matches
+        each match:
+        {
+          "distance": euclidean distance between centers
+          "iou": intersection over union of mask pixels
+          "fixed": fixed cell id
+          "moving": moving cell id
+          "cost": calculated cost
+        }
+    rejected : list of dict
+        list of pairs within max_dist threshold which were not chosen
+        same structure as matches
 
-    return array_np
+    """
 
+    # candidates within max_distance, but not assigned
+    rejected = []
+    matches = []
+    cols = cost_matrix.columns.tolist()
+    rows = cost_matrix.index.tolist()
+    for row, col in itertools.product(rows, cols):
+        if distance[col][row] < max_distance:
+            imatch = {
+                    "fixed": row,
+                    "moving": col,
+                    'distance': distance[col][row],
+                    'iou': iou[col][row],
+                    'cost': cost_matrix[col][row]}
+            if [row, col] in assigned_pairs:
+                matches.append(imatch)
+            else:
+                rejected.append(imatch)
 
-def imshow3d(img3d, display_row_num, display_col_num):
-    '''Display 3d images.'''
-
-    dep = np.shape(img3d)[0]
-    if display_row_num * display_col_num < dep:
-        logger.error("The number of row to display times the "
-                     "number of columns is less than the depth "
-                     "of the image. Fail to display.")
-        return
-
-    figs = plt.figure()
-
-    str_row = str(display_row_num)
-    str_col = str(display_col_num)
-
-    for i in range(dep):
-        id_panel = str_row + str_col + str(i + 1)
-        figs.add_subplot(id_panel)
-        plt.imshow(img3d[i, :, :])
-
-
-def read_tiff_3d(filename):
-    '''Read 3d tiff files. '''
-
-    img = sitk.ReadImage(filename)
-    dim = img.GetDimension()
-
-    if (dim != 2) and (dim != 3):
-        logger.error("Error in reading 3D tiff. Image "
-                     "dimension must be 2 or 3! ")
-
-    if dim == 3:
-        col, row, dep = img.GetSize()
-        tmp = sitk.GetArrayFromImage(img)
-        img3d = sitk2numpyarray(tmp)  # convert sitk array to numpy array
-    else:
-        col, row = img.GetSize()
-        dep = 1
-        tmp = sitk.GetArrayFromImage(img)
-        img2d = sitk2numpyarray(tmp)  # convert sitk array to numpy array
-        img3d = np.expand_dims(img2d, axis=0)
-
-    return img3d, col, row, dep
+    return matches, rejected
 
 
-def relabel(maskimg_3d):
-    ''' Relabel mask image to make labels continous and unique'''
+def region_properties(mask, mdict, integer_centroids=False):
+    """Characterize each label region in a mask
 
-    num_images = np.shape(maskimg_3d)[0]
-    labeloffset = 0
+    Parameters
+    ----------
+    mask : :class:`numpy.ndarray`
+        3D mask image (n x row x column)
+    mdict : dict
+        mapping for mask
+        {
+          "experiment": id of experiment
+          "mask_path": absolute path to mask
+          "mask_dict": {str(intensity): cellid}
+        }
+    integer_centroids : bool
+        force roi centroids to integers
 
-    for k in range(0, num_images):
-        labelimg = ms.label((maskimg_3d[k, :, :] > 0))
-        labelimg[labelimg > 0] = labelimg[labelimg > 0] + labeloffset
-        maskimg_3d[k, :, :] = labelimg
-        labeloffset = np.amax(labelimg)
+    Returns
+    -------
+    prop : dict
+        'centers' : :class:`numpy.ndarray`
+            (N x 2) Cartesian coordinates of region
+            centers-of-mass
+        'pixels' : set(tuples)
+            (row, column) tuples of pixels for each label
 
-    return maskimg_3d
+    """
+    prop = {}
+    n = mask.max()
+    prop['centers'] = np.zeros((n, 2))
+    prop['pixels'] = [[]] * n
+    prop['labels'] = [[]] * n
+    for i in np.arange(n):
+        label_locs = np.argwhere(mask == i + 1)
+        prop['labels'][i] = mdict['mask_dict'][str(i + 1)]
+        if len(label_locs) > 0:
+            if integer_centroids:
+                # NOTE: the rounding/int-cast here should not be here
+                # leaving it in place for now to preserve legacy
+                prop['centers'][i] = np.round(
+                        label_locs.mean(axis=0)).astype('int')[[-1, -2]]
+            else:
+                prop['centers'][i] = label_locs.mean(axis=0)[[-1, -2]]
+
+        prop['pixels'][i] = set([tuple(x) for x in label_locs])
+
+    # sometimes a cell ROI gets transformed outside
+    # add a null column for it
+    for label in mdict['mask_dict'].values():
+        if label not in prop['labels']:
+            prop['labels'].append(label)
+            prop['centers'] = np.append(
+                    prop['centers'],
+                    np.array([0, 0]).reshape(1, -1), axis=0)
+            prop['pixels'].append(set())
+    return prop
 
 
-def run_bipartite_matching(tool_name_args):
-    ''' call c++ executable.'''
+def calculate_distance_and_iou(
+        mask1, mask2, dict1, dict2,
+        integer_centroids=False, iou_rounding=False):
+    """Compute distance and intersection-over-union
+    for the labels in two masks
 
-    args = shlex.split(tool_name_args[0])
-    subprocess.check_call(args)
+    Parameters
+    ----------
+    mask1 : :class:`numpy.ndarray`
+        3D mask image (n x row x column)
+    mask2 : :class:`numpy.ndarray`
+        3D mask image (n x row x column)
+    dict1 : dict
+        mapping for mask1
+        {
+          "experiment": id of experiment
+          "mask_path": absolute path to mask
+          "mask_dict": {str(intensity): cellid}
+        }
+    dict2 : dict
+        mapping for mask2
+    integer_centroids : bool
+        force roi centroids to integers
+    iou_rounding : bool
+        preserve legacy mistake of ious forced to zero
+
+    Returns
+    -------
+    distance : :class:`pandas.DataFrame`
+        index = labels1, columns = labels2
+        Euclidean distance of centers
+    iou : :class:`pandas.DataFrame`
+        index = labels1, columns = labels2
+        intersection-over-union pixel area ratios
+
+    """
+    prop1 = region_properties(
+            mask1, dict1, integer_centroids=integer_centroids)
+    prop2 = region_properties(
+            mask2, dict2, integer_centroids=integer_centroids)
+
+    # pair-wise distances between cell centers
+    distance = scipy.spatial.distance.cdist(
+            prop1['centers'], prop2['centers'], 'euclidean')
+
+    # intersection-over-union
+    iou = np.zeros_like(distance)
+    for i, ipix in enumerate(prop1['pixels']):
+        for j, jpix in enumerate(prop2['pixels']):
+            intersection = len(ipix.intersection(jpix))
+            union = len(ipix.union(jpix))
+            if iou_rounding:
+                # NOTE
+                # the orginal was written in python 2 and
+                # the IOU calculation almost always gave 0 :(
+                # as does this still
+                iou[i, j] = intersection // union
+            else:
+                iou[i, j] = float(intersection) / union
+
+    distance = pd.DataFrame(distance, prop1['labels'], prop2['labels'])
+    iou = pd.DataFrame(iou, prop1['labels'], prop2['labels'])
+
+    return distance, iou
 
 
-def remove_tmp_files(filename):
-    ''' Remove temporary files. '''
+def calculate_cost_matrix(distance, iou, maximum_distance):
+    """Combine distance and iou into a cost
 
-    if os.path.isfile(filename):
-        os.remove(filename)
+    Parameters
+    ----------
+    distance : :class:`pandas.DataFrame`
+        index = labels1, columns = labels2
+        Euclidean distance of centers
+    iou : :class:`pandas.DataFrame`
+        index = labels1, columns = labels2
+        intersection-over-union pixel area ratios
+    maximum_distance : Int
+        threshold beyond which a large cost
+        will be incurred
+
+    Returns
+    -------
+    cost_matrix : :class:`pandas.DataFrame`
+        index = labels1, columns = labels2
+        N x M calculated cost matrix
+
+    """
+    norm_dist = np.array(distance) / maximum_distance
+    norm_dist[norm_dist > 1] = 999.0
+    cost_matrix = norm_dist + (1.0 - np.array(iou))
+    cost_matrix = pd.DataFrame(
+            cost_matrix, distance.index.tolist(), distance.columns.tolist())
+    return cost_matrix
 
 
-class ComputePairWiseMatch(object):
-    ''' Class for pairwise ophys matching.
+def cell_matching(
+        mask1, mask2, dict1, dict2, max_dist, solver, hungarian_exe,
+        integer_centroids=False, iou_rounding=False):
+    """matching between 2 masks
 
-        Images are registered using intensity correlation.
-        Best matches between cells are determined by bipartite graph matching.
-    '''
+    Parameters
+    ----------
+    mask1 : :class:`numpy.ndarray`
+        3D mask image (n x row x column)
+    mask2 : :class:`numpy.ndarray`
+        3D mask image (n x row x column)
+    dict1 : dict
+        mapping for mask1
+        {
+          "experiment": id of experiment
+          "mask_path": absolute path to mask
+          "mask_dict": {str(intensity): cellid}
+        }
+    dict2 : dict
+        mapping for mask2
+    max_dist : int
+        maximum distance threshold [pixels]. In the case of
+        the Hungarian minimum weight algorithm, pairs beyond this
+        threshold will receive a very large weight. In the case
+        of the Blossom algorithm, pairs beyond this threshold will
+        not be part of the graph.
+    solver : str
+       one of "Hungarian-cpp", "Hungarian" (scipy), or "Blossom"
+    hungarian_exe : str
+       absolute path to compiled Hungarian executable
+    integer_centroids : bool
+        force roi centroids to integers
+    iou_rounding : bool
+        preserve legacy mistake of ious forced to zero
 
-    def __init__(self, dir_output):
+    Returns
+    -------
+    cost_matrix : :class:`pandas.DataFrame`
+        index = labels1, columns = labels2
+        N x M calculated cost matrix
+    matches : list of dict
+        list of matches
+        each match:
+        {
+          "distance": euclidean distance between centers
+          "iou": intersection over union of mask pixels
+          "fixed": fixed cell id
+          "moving": moving cell id
+          "cost": calculated cost
+        }
+    rejected : list of dict
+        list of pairs within max_dist threshold which were not chosen
+        same structure as matches
 
-        self.dir_output = dir_output
-        self.segmask_fixed_3d = np.array([])
-        self.segmask_moving_3d = np.array([])
-        self.segmask_moving_3d_registered = np.array([])
-        self.matching_table = np.array([])
-        self.segmask_fixed_3d_sz = 0
-        self.segmask_moving_3d_sz = 0
+    """
 
-    def match_pairs(self, para, para_matching):
-        ''' Pairwise matching of ophys-ophys sessions. '''
+    distance, iou = calculate_distance_and_iou(
+        mask1, mask2, dict1, dict2,
+        integer_centroids=integer_centroids,
+        iou_rounding=iou_rounding)
 
-        filename_output_fixed_matched_img = ''
-        filename_output_moving_matched_img = ''
+    cost_matrix = calculate_cost_matrix(distance, iou, max_dist)
 
-        filename_matching_table = \
-            para_matching['filename_exp_prefix_fixed'] + \
-            '_to_' + \
-            para_matching['filename_exp_prefix_moving']
+    assigned_pairs = gen_assignment_pairs(cost_matrix, solver, hungarian_exe)
 
-        # register the average intensity images
-        tform = self.register_intensity_images(
-                para,
-                para_matching['filename_intensity_fixed'],
-                para_matching['filename_intensity_moving'])
+    matches, rejected = gen_matching_table(
+            cost_matrix,
+            assigned_pairs,
+            distance,
+            iou,
+            max_dist)
 
-        # read segmentation masks
-        (
-                self.segmask_fixed_3d,
-                col_segmask_fixed_3d,
-                row_segmask_fixed_3d,
-                dep_segmask_fixed_3d) = read_tiff_3d(
-                        para_matching['filename_segmask_fixed'])
-        (
-                self.segmask_moving_3d,
-                col_segmask_moving_3d,
-                row_segmask_moving_3d,
-                dep_segmask_moving_3d) = read_tiff_3d(
-                        para_matching['filename_segmask_moving'])
+    return cost_matrix, matches, rejected
 
-        # switch row and col of segmasks
-        segmask_fixed_3d_tmp = np.zeros(
-            (dep_segmask_fixed_3d,
-             row_segmask_fixed_3d,
-             col_segmask_fixed_3d),
+
+def transform_mask(moving, dst_shape, tform):
+    """warp a mask according to a transform
+
+    Parameters
+    ----------
+    moving : :class:`numpy.ndarray`
+        nlayers x n x m int
+    dst_shape : tuple
+        (n', m') shape of destination layers
+    tform : :class:`numpy.ndarry`
+        3 x 3 transformation matrix
+
+    Returns
+    -------
+    transformed_3d : :class:`numpy.ndarray`
+        nlayer x n' x m' int
+
+    """
+
+    transformed_3d = np.zeros(
+            (
+                moving.shape[0],
+                dst_shape[0],
+                dst_shape[1]),
             dtype=np.int)
 
-        for i in range(dep_segmask_fixed_3d):
-            segmask_fixed_3d_tmp[i, :, :] = \
-                np.transpose(self.segmask_fixed_3d[i, :, :])
-        self.segmask_fixed_3d = np.copy(segmask_fixed_3d_tmp)
+    for k, frame in enumerate(moving):
+        labels = np.unique(frame)
+        transformed_2d = np.zeros(dst_shape)
 
-        segmask_moving_3d_tmp = np.zeros((
-            dep_segmask_moving_3d,
-            row_segmask_moving_3d,
-            col_segmask_moving_3d))
-        for i in range(dep_segmask_moving_3d):
-            segmask_moving_3d_tmp[i, :, :] = np.transpose(
-                    self.segmask_moving_3d[i, :, :])
-        self.segmask_moving_3d = np.copy(segmask_moving_3d_tmp)
+        for label in labels:
+            tmp = np.zeros_like(frame).astype('float32')
+            tmp[frame == label] = 1
+            tmp_registered = cv2.warpPerspective(
+                    tmp,
+                    tform,
+                    dst_shape[::-1],
+                    flags=cv2.INTER_LINEAR + cv2.WARP_INVERSE_MAP)
 
-        self.segmask_fixed_3d_sz = [
-            dep_segmask_fixed_3d,
-            row_segmask_fixed_3d,
-            col_segmask_fixed_3d]
-        self.segmask_moving_3d_sz = [
-            dep_segmask_moving_3d,
-            row_segmask_moving_3d,
-            col_segmask_moving_3d]
+            transformed_2d[tmp_registered > 0] = label
 
-        # relabeling segmentation masks because they are unit
-        # 8 data type and only code 255 regions
-        self.segmask_fixed_3d = relabel(self.segmask_fixed_3d)
-        self.segmask_moving_3d = relabel(self.segmask_moving_3d)
+        transformed_3d[k, :, :] = transformed_2d
 
-        filename_segmask_fixed_relabel = os.path.join(
-            self.dir_output,
-            para_matching['filename_exp_prefix_fixed'] + '_maxInt_masks_relabel.tif')
+    return transformed_3d
 
-        sitk_segmask_fixed = sitk.GetImageFromArray(
-            self.segmask_fixed_3d.astype(np.uint16))
-        sitk.WriteImage(sitk_segmask_fixed, filename_segmask_fixed_relabel)
 
-        filename_segmask_moving_relabel = os.path.join(
-            self.dir_output,
-            para_matching['filename_exp_prefix_moving'] + '_maxInt_masks_relabel.tif')
+def register_intensity_images(
+        img_path_fixed, img_path_moving, maxCount, epsilon, motion_type):
+    """find the transform that registers two images
 
-        sitk_segmask_moving = sitk.GetImageFromArray(
-            self.segmask_moving_3d.astype(np.uint16))
-        sitk.WriteImage(sitk_segmask_moving, filename_segmask_moving_relabel)
+    Parameters
+    ----------
+    img_path_fixed : str
+        path to fixed image
+    img_path_moving : str
+        path to moving image
+    maxCount : int
+        passed as maxCount to opencv termination criteria
+    epsilon : float
+        passed as epsilon to opencv termination criteria
+    motion_type : str
+        one of the 4 possible motion types for opencv findTransformECC
 
-        if para['diagnostic_figures'] == 1:
-            imshow3d(self.segmask_fixed_3d, 1, self.segmask_fixed_3d_sz[0])
-            imshow3d(self.segmask_moving_3d, 1, self.segmask_moving_3d_sz[0])
+    Returns
+    -------
+    tform : :class:`numpy.ndarry`
+        3 x 3 transformation matrix
 
-        # transform moving segmentation masks
-        # compute self.segmask_moving_3d_registered
-        self.register_mask_images(tform)
+    img_moving_warped : :class:`numpy.ndarray`
+        warped moving image, same shape as fixed image, uint8
 
-        if para['diagnostic_figures'] == 1:
-            imshow3d(
-                    self.segmask_moving_3d_registered,
-                    1,
-                    self.segmask_moving_3d_sz[0])
+    """
 
-        # matching cells
-        tmp_filenames = dict()
-        tmp_filenames['fixed_matched_img'] = \
-            filename_output_fixed_matched_img
-        tmp_filenames['moving_matched_img'] = \
-            filename_output_moving_matched_img
-        tmp_filenames['matching_table'] = filename_matching_table
+    cvmotion = {
+            "MOTION_TRANSLATION": cv2.MOTION_TRANSLATION,
+            "MOTION_EUCLIDEAN": cv2.MOTION_EUCLIDEAN,
+            "MOTION_AFFINE": cv2.MOTION_AFFINE,
+            "MOTION_HOMOGRAPHY": cv2.MOTION_HOMOGRAPHY}
 
-        [matching_ratio_fixed, matching_ratio_moving, weight_matrix] = \
-            self.cell_matching(para, tmp_filenames)
+    # read average intensity images
+    with PIL.Image.open(img_path_fixed) as im:
+        img_fixed = np.array(im)
+    with PIL.Image.open(img_path_moving) as im:
+        img_moving = np.array(im)
 
-        matching_pairs = dict()
-        matching_pairs['res'] = self.matching_table
-        matching_pairs['mr_i'] = matching_ratio_fixed
-        matching_pairs['mr_j'] = matching_ratio_moving
-        matching_pairs['segmask_i'] = self.segmask_fixed_3d
-        matching_pairs['segmask_j'] = self.segmask_moving_3d_registered
-        matching_pairs['weight_matrix'] = weight_matrix
-        matching_pairs['moving'] = para_matching['filename_intensity_moving']
-        matching_pairs['fixed'] = para_matching['filename_intensity_fixed']
+    # Define termination criteria
+    criteria = (
+            cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT,
+            maxCount,
+            epsilon)
 
-        # if affine only, output full 3x3
-        if tform.shape == (2, 3):
-            tform = np.vstack((tform, [0, 0, 1]))
+    warp_matrix = np.eye(2, 3, dtype=np.float32)
+    if motion_type == 'MOTION_HOMOGRAPHY':
+        warp_matrix = np.eye(3, 3, dtype=np.float32)
 
-        matching_pairs['transform'] = np.round(tform, 6).tolist()
-
-        return matching_pairs
-
-    def register_intensity_images(
-            self, para, filename_int_fixed, filename_int_moving):
-        ''' Register the average intensity images of the two ophys
-            sessions using affine transformation'''
-
-        # read average intensity images
-        img_fixed = np.array(im.open(filename_int_fixed))
-        img_moving = np.array(im.open(filename_int_moving))
-
-        # Find size of img_fixed
-        sz_fixed = np.shape(img_fixed)
-
-        # Define the motion model
-        warp_mode = cv2.MOTION_AFFINE
-
-        # Define 2x3 or 3x3 matrices and initialize the matrix to identity
-        if warp_mode == cv2.MOTION_HOMOGRAPHY:
-            tform = np.eye(3, 3, dtype=np.float32)
-        else:
-            tform = np.eye(2, 3, dtype=np.float32)
-
-        # Define termination criteria
-        criteria = (
-                cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT,
-                para['registration_iterations'],
-                para['registration_precision'])
-
+    try:
         # Run the ECC algorithm. The results are stored in warp_matrix.
-        (ccval, tform) = cv2.findTransformECC(
+        ccval, tform = cv2.findTransformECC(
                 img_fixed,
                 img_moving,
-                tform,
-                warp_mode,
+                warp_matrix,
+                cvmotion[motion_type],
                 criteria)
-                # for opencv 4.0:
-                #inputMask=None,
-                #gaussFiltSize=5)
-
-        if warp_mode == cv2.MOTION_HOMOGRAPHY:
-            # Use warpPerspective for Homography
-            img_moving_registered = cv2.warpPerspective(
-                img_moving,
-                tform,
-                (sz_fixed[1],
-                 sz_fixed[0]),
-                flags=cv2.INTER_LINEAR +
-                cv2.WARP_INVERSE_MAP)
-        else:
-            # Use warpAffine for Translation, Euclidean and Affine
-            img_moving_registered = cv2.warpAffine(
-                img_moving,
-                tform,
-                (sz_fixed[1],
-                 sz_fixed[0]),
-                flags=cv2.INTER_LINEAR +
-                cv2.WARP_INVERSE_MAP)
-
-        if para['diagnostic_figures'] == 1:
-
-            sz0, sz1 = np.shape(img_fixed)
-            img_overlay_ori = np.zeros((sz0, sz1, 3), np.uint8)
-            img_overlay = np.zeros((sz0, sz1, 3), np.uint8)
-
-            img_overlay_ori[:, :, 0] = img_fixed
-            img_overlay_ori[:, :, 1] = img_moving
-
-            img_overlay[:, :, 0] = img_fixed
-            img_overlay[:, :, 1] = img_moving_registered
-
-            figs = plt.figure()
-            figs.add_subplot(231)
-            plt.imshow(img_fixed, cmap='gray')
-            figs.add_subplot(232)
-            plt.imshow(img_moving, cmap='gray')
-            figs.add_subplot(233)
-            plt.imshow(img_moving_registered, cmap='gray')
-            figs.add_subplot(234)
-            plt.imshow(img_overlay_ori)
-            figs.add_subplot(235)
-            plt.imshow(img_overlay)
-
-        if para['save_registered_image'] == 1:
-
-            ind_moving = filename_int_moving.find('ophys_experiment_')
-            ind_fixed = filename_int_fixed.find('ophys_experiment_')
-
-            filename_prefix_moving = \
-                filename_int_moving[ind_moving:ind_moving + 26]
-            filename_prefix_fixed = \
-                filename_int_fixed[ind_fixed:ind_fixed + 26]
-
-            filename = os.path.join(
-                self.dir_output,
-                'register_' + filename_prefix_moving +
-                '_to_' + filename_prefix_fixed + '.tif')
-            sitk_img_moving_registered = sitk.GetImageFromArray(
-                img_moving_registered.astype(np.uint8))
-            sitk.WriteImage(sitk_img_moving_registered, filename)
-
-        return tform
-
-    def register_mask_images(self, tform):
-        ''' Transform segmentation masks using the affine
-            transformation defined by tform'''
-
-        row_segmask_fixed_3d = self.segmask_fixed_3d_sz[1]
-        col_segmask_fixed_3d = self.segmask_fixed_3d_sz[2]
-        num_images_moving = self.segmask_moving_3d_sz[0]
-
-        self.segmask_moving_3d_registered = np.zeros((
-            num_images_moving,
-            row_segmask_fixed_3d,
-            col_segmask_fixed_3d),
-            dtype=np.int)
-
-        # number of frames in segmask_moving_3d
-        for k in range(num_images_moving):
-
-            num = np.int(np.amax(self.segmask_moving_3d[k, :, :]))
-            segmask_2d_registered = np.zeros(
-                (row_segmask_fixed_3d, col_segmask_fixed_3d))
-
-            for i in range(1, num + 1):  # number of cells in the current frame
-                # tmp = np.zeros((row_segmask_fixed_3d, col_segmask_fixed_3d))
-                tmp = np.zeros((
-                        self.segmask_moving_3d_sz[1],
-                        self.segmask_moving_3d_sz[2]))
-                tmp[self.segmask_moving_3d[k, :, :] == i] = i
-
-                if np.count_nonzero(tmp) > 0:  # this label exists
-
-                    tmp_registered = cv2.warpAffine(
-                        tmp,
-                        tform,
-                        (col_segmask_fixed_3d,
-                         row_segmask_fixed_3d),
-                        flags=cv2.INTER_LINEAR +
-                        cv2.WARP_INVERSE_MAP)
-
-                    segmask_2d_registered[tmp_registered > 0] = i
-
-            self.segmask_moving_3d_registered[k, :, :] = segmask_2d_registered
-
-        np.amax(self.segmask_moving_3d_registered)
-
-        return self.segmask_moving_3d_registered
-
-    def compute_features(self, para, filename_weightmatrix):
-        ''' Computer features and weight matrix needed for
-            bipartite graph matching.'''
-
-        # compute features of fixed and moving images
-        fixed_img = rp.RegionProperties(self.segmask_fixed_3d)
-        moving_img = rp.RegionProperties(self.segmask_moving_3d_registered)
-
-        fixed_fea = dict()
-        moving_fea = dict()
-
-        fixed_fea['areas'] = fixed_img.get_areas()
-        moving_fea['areas'] = moving_img.get_areas()
-
-        fixed_fea['labels'], fixed_fea['cellnum'] = fixed_img.get_labels()
-        moving_fea['labels'], moving_fea['cellnum'] = moving_img.get_labels()
-
-        fixed_fea['centers'] = fixed_img.get_centers()
-        moving_fea['centers'] = moving_img.get_centers()
-
-        # take only x,y value
-        fixed_fea['centers'] = fixed_fea['centers'][:, 1:3]
-        # take only x,y value
-        moving_fea['centers'] = moving_fea['centers'][:, 1:3]
-
-        pixelidxlist_fixed = fixed_img.get_pixel_idx_list()     # dictionary
-
-        [
-                fixed_fea['num_img'],
-                fixed_fea['row_segmask'],
-                fixed_fea['col_segmask']] = self.segmask_fixed_3d_sz
-        [
-                moving_fea['num_img'],
-                moving_fea['row_segmask'],
-                moving_fea['col_segmask']] = self.segmask_moving_3d_sz
-
-        # compute features of bipartite graph edges
-        edge_fea = dict()
-        edge_fea['dist'] = np.zeros(
-                (fixed_fea['cellnum'], moving_fea['cellnum']))
-        edge_fea['overlap'] = np.zeros(
-                (fixed_fea['cellnum'], moving_fea['cellnum']))
-
-        for i in range(0, fixed_fea['cellnum']):
-            # compute pair-wise distances between cell centers
-            for j in range(0, moving_fea['cellnum']):
-                edge_fea['dist'][i, j] = np.sqrt(
-                    (fixed_fea['centers'][i, 0] -
-                        moving_fea['centers'][j, 0]) *
-                    (fixed_fea['centers'][i, 0] -
-                        moving_fea['centers'][j, 0]) +
-                    (fixed_fea['centers'][i, 1] -
-                        moving_fea['centers'][j, 1]) *
-                    (fixed_fea['centers'][i, 1] -
-                        moving_fea['centers'][j, 1]))
-
-            segmask_fixed_this_layer = self.segmask_fixed_3d[
-                    pixelidxlist_fixed[fixed_fea['labels'][i]][0, 0], :, :]
-            cellmask_fixed = (segmask_fixed_this_layer == i + 1)
-
-            # compute overlap between cell centers
-            for j in range(0, moving_fea['num_img']):
-
-                segmask_moving_this_layer = \
-                    self.segmask_moving_3d_registered[j, :, :]
-
-                # exclude background with label 0
-                labels_moving_this_layer = np.unique(
-                    segmask_moving_this_layer[cellmask_fixed > 0]) - [0]
-                labels_moving_this_layer_num = len(labels_moving_this_layer)
-
-                # Compute for each overlapping cell in moving image
-                for k in range(0, labels_moving_this_layer_num):
-
-                    cellmask_moving = (
-                            segmask_moving_this_layer ==
-                            labels_moving_this_layer[k])
-
-                    mask_intersection = np.multiply(
-                            cellmask_moving, cellmask_fixed)
-                    mask_union = np.add(cellmask_moving, cellmask_fixed)
-                    area_intersection = np.count_nonzero(mask_intersection)
-                    area_union = np.count_nonzero(mask_union)
-                    edge_fea['overlap'][i, labels_moving_this_layer[k] - 1] = \
-                        area_intersection / area_union
-
-        dist2 = np.copy(edge_fea['dist'])
-        dist2 = dist2 / para['maximum_distance']
-        dist2[dist2 > 1] = 999.0
-        # overlap2 = \
-        #        1 - \
-        #        edge_fea['overlap'].astype(float) / \
-        #        np.amax(edge_fea['overlap'])
-        overlap2 = 1 - edge_fea['overlap'].astype(float)
-        edge_fea['weight_matrix'] = dist2 + overlap2
-
-        if para['diagnostic_figures'] == 1:
-            figs = plt.figure()
-            figs.add_subplot(221)
-            plt.imshow(dist2, cmap='gray')
-            figs.add_subplot(222)
-            plt.imshow(overlap2, cmap='gray')
-            figs.add_subplot(223)
-            plt.imshow(edge_fea['weight_matrix'], cmap='gray')
-
-        np.savetxt(
-            filename_weightmatrix,
-            edge_fea['weight_matrix'],
-            delimiter=' ')
-
-        return fixed_fea, moving_fea, edge_fea
-
-    def write_matching_images(self, para):
-        ''' Write matching results into images. The same
-            label codes the same cell.'''
-
-        if (
-                (len(para['filename_fixed']) > 0) &
-                (len(para['filename_moving']) > 0)):
-
-            para['filename_fixed'] = os.path.join(self.dir_output, para['filename_fixed'])
-            para['filename_moving'] = os.path.join(self.dir_output, para['filename_moving'])
-
-            segmask_moving_3d_matching = np.zeros(
-                    self.segmask_moving_3d_registered.shape)
-            segmask_fixed_3d_matching = np.zeros(self.segmask_fixed_3d.shape)
-
-            for i in range(self.matching_table.shape[0]):
-                if (
-                        self.matching_table[i, 0] > 0 and
-                        self.matching_table[i, 1] > 0):
-
-                    segmask_fixed_3d_matching[
-                            self.segmask_fixed_3d ==
-                            para['labels_fixed'][
-                                self.matching_table[i, 0] - 1]] = \
-                                    self.matching_table[i, 0]
-                    segmask_moving_3d_matching[
-                            self.segmask_moving_3d_registered ==
-                            para['labels_moving'][
-                                self.matching_table[i, 1] - 1]] = \
-                        self.matching_table[i, 0]
-
-            sitk_img1 = sitk.GetImageFromArray(
-                    segmask_fixed_3d_matching.astype(np.uint16))
-            sitk.WriteImage(sitk_img1, para['filename_fixed'])
-
-            sitk_img2 = sitk.GetImageFromArray(
-                    segmask_moving_3d_matching.astype(np.uint16))
-            sitk.WriteImage(sitk_img2, para['filename_moving'])
-
-    def gen_matching_table(self, para, para_matching):
-        '''Generate self.matching_table using bipartite graph matching.'''
-
-        tool_name_args = [para['munkres_executable'] + " " +
-                          para_matching['filename_weightmatrix'] + " " +
-                          str(para_matching['fixed_cellnum']) + " " +
-                          str(para_matching['moving_cellnum']) + " " +
-                          para_matching['filename_tmpmatching']]
-
-        run_bipartite_matching(tool_name_args)
-
-        # load matching result produced by bp_matching
-        matching_pair = np.loadtxt(
-                para_matching['filename_tmpmatching'],
-                delimiter=' ').astype(int)
-
-        # remove pairs that do not satisfy distance condition
-        # matching_num is the smaller value of the number of regions in fixed
-        # or moving masks
-        num_matched = 0
-
-        # determine the number of rows in matching_table
-        # include all cells in fixed image
-        count = para_matching['fixed_cellnum']
-
-        for i in range(para_matching['moving_cellnum']):
-            ind = np.argwhere(matching_pair[:, 1] == i)
-            if ind.size == 0:
-                # add those moving cells that are not in matching_pair
-                count = count + 1
-            elif para_matching['edge_fea']['dist'][
-                    int(matching_pair[ind[0][0], 0]),
-                    int(matching_pair[ind[0][0], 1])] >= \
-                    para['maximum_distance']:
-                # revent cells too far from matching even
-                # if matching_pair match them
-                count = count + 1
-
-        self.matching_table = np.zeros((count, 5))
-
-        # add all cells in fixed image
-        for i in range(para_matching['fixed_cellnum']):
-            ind = np.argwhere(matching_pair[:, 0] == i)
-            if ind.size != 0:
-                if para_matching['edge_fea']['dist'][
-                        int(matching_pair[ind[0], 0][0]),
-                        int(matching_pair[ind[0], 1][0])] < \
-                        para['maximum_distance']:
-                    # label index starts from 0, but label value starts from 1,
-                    self.matching_table[i, 0] = matching_pair[ind, 0] + 1
-                    self.matching_table[i, 1] = matching_pair[ind, 1] + 1
-                    self.matching_table[i, 2] = \
-                        para_matching['edge_fea']['dist'][
-                                int(matching_pair[ind[0], 0][0]),
-                                int(matching_pair[ind[0], 1][0])]
-                    self.matching_table[i, 3] = \
-                        para_matching['edge_fea']['overlap'][
-                                int(matching_pair[ind[0], 0][0]),
-                                int(matching_pair[ind[0], 1][0])]
-                    self.matching_table[i, 4] = \
-                        para_matching['edge_fea']['weight_matrix'][
-                                int(matching_pair[ind[0], 0][0]),
-                                int(matching_pair[ind[0], 1][0])]
-                    num_matched = num_matched + 1
-                else:
-                    # does not allow matching
-                    # label index starts from 0, but label value starts from 1,
-                    self.matching_table[i, 0] = matching_pair[ind, 0] + 1
-                    self.matching_table[i, 1] = -1
-                    self.matching_table[i, 2] = -1
-                    self.matching_table[i, 3] = -1
-                    self.matching_table[i, 4] = -1
-            else:
-                # label index starts from 0, but label value starts from 1,
-                self.matching_table[i, 0] = i + 1
-                self.matching_table[i, 1] = -1
-                self.matching_table[i, 2] = -1
-                self.matching_table[i, 3] = -1
-                self.matching_table[i, 4] = -1
-
-        # add the remaining cells in moving image
-        count = para_matching['fixed_cellnum']
-
-        for i in range(para_matching['moving_cellnum']):
-            # notice self.matching_table, not matching_pair
-            ind = np.argwhere(self.matching_table[:, 1] == i + 1)
-            if ind.size == 0:
-                # label index starts from 0, but label value starts from 1,
-                self.matching_table[count, 0] = -1
-                self.matching_table[count, 1] = i + 1
-                self.matching_table[count, 2] = -1
-                self.matching_table[count, 3] = -1
-                self.matching_table[count, 4] = -1
-                count = count + 1
-
-        return num_matched
-
-    def cell_matching(self, para, tmp_filenames):
-        ''' Function that matches cells. '''
-
-        # compute features
-        filename_weightmatrix = os.path.join(self.dir_output, 'weightmatrix.txt')
-        fixed_fea, moving_fea, edge_fea = \
-            self.compute_features(para, filename_weightmatrix)
-
-        # Generate matching result by calling bipartite graph matching in c++
-        filename_tmpmatching = os.path.join(
-            self.dir_output, 'matching_result_temporary.txt')
-
-        para_matching = dict()
-
-        para_matching['filename_weightmatrix'] = filename_weightmatrix
-        para_matching['filename_tmpmatching'] = filename_tmpmatching
-        para_matching['fixed_cellnum'] = fixed_fea['cellnum']
-        para_matching['moving_cellnum'] = moving_fea['cellnum']
-        para_matching['edge_fea'] = edge_fea
-
-        num_matched = self.gen_matching_table(para, para_matching)
-
-        # write matching images, matched cells are given the same label
-        # unmatched cells are not labeled in the image
-        para_w = dict()
-        para_w['filename_fixed'] = tmp_filenames['fixed_matched_img']
-        para_w['filename_moving'] = tmp_filenames['moving_matched_img']
-        para_w['labels_fixed'] = fixed_fea['labels']
-        para_w['labels_moving'] = moving_fea['labels']
-
-        self.write_matching_images(para_w)
-
-        # write matching table
-        if len(tmp_filenames['matching_table']) > 0:
-            filename_matching_table = os.path.join(
-                self.dir_output, tmp_filenames['matching_table'])
-            np.savetxt(
-                filename_matching_table,
-                self.matching_table,
-                delimiter=' ',
-                fmt="%d %d %7.4e %7.4e %7.4e")
-
-        matching_ratio_fixed = np.float(num_matched) / fixed_fea['cellnum']
-        matching_ratio_moving = np.float(num_matched) / moving_fea['cellnum']
-
-        # remove temporary files
-        remove_tmp_files(filename_weightmatrix)
-        remove_tmp_files(filename_tmpmatching)
-
-        return (
-                matching_ratio_fixed,
-                matching_ratio_moving,
-                edge_fea['weight_matrix'])
+    except cv2.error:
+        logger.error("failed to align images {} and {}".format(
+            img_path_fixed,
+            img_path_moving))
+        raise
+
+    if motion_type == 'MOTION_HOMOGRAPHY':
+        warp = cv2.warpPerspective
+    else:
+        warp = cv2.warpAffine
+
+    img_moving_warped = warp(
+            img_moving,
+            tform,
+            img_fixed.shape[::-1],
+            flags=cv2.INTER_LINEAR + cv2.WARP_INVERSE_MAP).astype(np.uint8)
+
+    # if affine only, output full 3x3
+    if tform.shape == (2, 3):
+        tform = np.vstack((tform, [0, 0, 1]))
+
+    return tform, img_moving_warped
+
+
+class PairwiseMatching(ArgSchemaParser):
+    default_schema = PairwiseMatchingSchema
+    default_output_schema = PairwiseOutputSchema
+    """Class for matching cells between optical physiology sessions
+    """
+
+    def run(self):
+        """main function call for PairwiseMatching
+        """
+        self.logger.info('Matching %d to %d ...' % (
+            self.args['fixed']['id'],
+            self.args['moving']['id']))
+
+        # identifying strings for filenames
+        fixed_strid = '%s' % self.args['fixed']['id']
+        moving_strid = '%s' % self.args['moving']['id']
+
+        # register the average intensity images
+        self.tform, moving_warped = register_intensity_images(
+                self.args['fixed'][
+                    'ophys_average_intensity_projection_image'],
+                self.args['moving'][
+                    'ophys_average_intensity_projection_image'],
+                self.args['registration_iterations'],
+                self.args['registration_precision'],
+                self.args['motionType'])
+
+        if self.args['save_registered_image']:
+            imfname = os.path.join(
+                self.args['output_directory'],
+                'register_%s_to_%s.tif' % (moving_strid, fixed_strid))
+            with PIL.Image.fromarray(moving_warped) as im:
+                im.save(imfname)
+
+        segmask_fixed_3d = utils.read_tiff_3d(
+                self.args['fixed']['nice_mask_path'])
+        segmask_moving_3d = utils.read_tiff_3d(
+                self.args['moving']['nice_mask_path'])
+
+        # transform moving segmentation mask
+        segmask_moving_3d_registered = transform_mask(
+                segmask_moving_3d,
+                segmask_fixed_3d.shape[1:],
+                self.tform)
+
+        with open(self.args['fixed']['nice_dict_path'], 'r') as f:
+            fixed_dict = json.load(f)
+        with open(self.args['moving']['nice_dict_path'], 'r') as f:
+            moving_dict = json.load(f)
+
+        # matching cells
+        self.cost_matrix, self.matches, self.rejected = cell_matching(
+                    segmask_fixed_3d,
+                    segmask_moving_3d_registered,
+                    fixed_dict,
+                    moving_dict,
+                    self.args['maximum_distance'],
+                    self.args['assignment_solver'],
+                    self.args['hungarian_executable'],
+                    integer_centroids=self.args['integer_centroids'],
+                    iou_rounding=self.args['iou_rounding'])
+
+        output_json = {
+                'matches': self.matches,
+                'rejected': self.rejected,
+                'fixed_experiment': self.args['fixed']['id'],
+                'moving_experiment': self.args['moving']['id'],
+                'transform': {
+                    "properties": utils.calc_first_order_properties(
+                        self.tform),
+                    'matrix': self.tform.tolist()
+                    }
+                }
+        self.output(output_json, indent=2)
+
+        return
+
+
+if __name__ == "__main__":  # pragma: no cover
+    pmod = PairwiseMatching()
+    pmod.run()
