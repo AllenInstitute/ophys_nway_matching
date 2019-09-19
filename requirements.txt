@@ -4,3 +4,4 @@ pillow
 scikit-image
 matplotlib
 opencv-python==3.4.0.12
+pandas
