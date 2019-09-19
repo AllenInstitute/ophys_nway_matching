@@ -4,6 +4,9 @@ import matplotlib.gridspec as gridspec
 import json
 import numpy as np
 import itertools
+from argschema import ArgSchemaParser
+from nway.schemas import NwayDiagnosticSchema
+import os
 
 
 def pairwise_transforms(
@@ -327,3 +330,20 @@ def plot_all(nway_output_path, fname=None):
         p.savefig(fig2)
         p.savefig(fig3)
         p.close()
+
+
+class NwayDiagnostics(ArgSchemaParser):
+    default_schema = NwayDiagnosticSchema
+
+    def run(self):
+        if self.args['use_input_dir']:
+            self.args['output_pdf'] = os.path.join(
+                    os.path.dirname(self.args['input_json']),
+                    os.path.basename(self.args['output_pdf']))
+
+        plot_all(self.args['input_json'], fname=self.args['output_pdf'])
+
+
+if __name__ == "__main__":  # pragma: no cover
+    nd = NwayDiagnostics()
+    nd.run()
