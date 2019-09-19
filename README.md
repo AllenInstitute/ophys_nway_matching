@@ -1,2 +1,2 @@
-# nway_recover
-attempt at clean reproduction of ophys nway repo(s)
+# ophys_nway_matching
+N-way matching of segmented cell ROIs
