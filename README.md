@@ -4,7 +4,6 @@ N-way matching of segmented cell ROIs
 # quick start
 (original code is python 2.7. TODO, update to python 3)
 
-
 ```
 conda create -n testpy27 python=2.7
 conda activate testpy27
