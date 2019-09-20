@@ -1,4 +1,6 @@
 import pytest
+import matplotlib
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
 import nway.diagnostics as nwdi

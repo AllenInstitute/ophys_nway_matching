@@ -15,6 +15,7 @@ class PyTest(TestCommand):
         import shlex
         import pytest
         self.pytest_args += " --cov=nway --cov-report html "\
+                            "--cov-report xml "\
                             "--junitxml=test-reports/test.xml"
 
         errno = pytest.main(shlex.split(self.pytest_args))
