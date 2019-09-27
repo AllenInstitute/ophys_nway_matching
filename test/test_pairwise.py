@@ -278,8 +278,10 @@ def test_calculate_cost_matrix():
     assert np.all(carr[ind] == (darr[ind]/10 + 0.5))
 
 
+@pytest.mark.parametrize('CLAHE_grid', [-1, 8])
 @pytest.mark.parametrize('motion', ['MOTION_AFFINE', 'MOTION_HOMOGRAPHY'])
-def test_register(input_file, tmpdir, motion):
+def test_register(input_file, tmpdir, motion, CLAHE_grid):
+    CLAHE_clip = 2.5
     with open(input_file, 'r') as f:
         j = json.load(f)
     impath = (
@@ -312,12 +314,14 @@ def test_register(input_file, tmpdir, motion):
             mname,
             1000,
             1.5e-7,
-            motion)
+            motion,
+            CLAHE_grid,
+            CLAHE_clip)
 
     # is the affine transform pretty close to what we put in?
     assert np.all(np.isclose(tform[0:2, 0:2], new_tform[0:2, 0:2], atol=0.005))
     # are the translations pretty close to what we put in?
-    assert np.all(np.isclose(tform[:, 2], new_tform[:, 2], atol=1.0))
+    assert np.all(np.isclose(tform[:, 2], new_tform[:, 2], atol=2.0))
 
     # can't align one random image
     if motion == 'MOTION_AFFINE':
@@ -331,4 +335,6 @@ def test_register(input_file, tmpdir, motion):
                     rname,
                     1000,
                     1.5e-7,
-                    motion)
+                    motion,
+                    CLAHE_grid,
+                    CLAHE_clip)
