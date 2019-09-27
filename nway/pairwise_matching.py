@@ -435,7 +435,8 @@ def transform_mask(moving, dst_shape, tform):
 
 
 def register_intensity_images(
-        img_path_fixed, img_path_moving, maxCount, epsilon, motion_type):
+        img_path_fixed, img_path_moving, maxCount,
+        epsilon, motion_type, CLAHE_grid, CLAHE_clip):
     """find the transform that registers two images
 
     Parameters
@@ -450,6 +451,10 @@ def register_intensity_images(
         passed as epsilon to opencv termination criteria
     motion_type : str
         one of the 4 possible motion types for opencv findTransformECC
+    CLAHE_grid : int
+        passed as tileGridSize to cv2.createCLAHE
+    CLAHE_clip : int
+        passed as clipLimit to cv2.createCLAHE
 
     Returns
     -------
@@ -472,6 +477,13 @@ def register_intensity_images(
         img_fixed = np.array(im)
     with PIL.Image.open(img_path_moving) as im:
         img_moving = np.array(im)
+
+    if CLAHE_grid != -1:
+        clahe = cv2.createCLAHE(
+            clipLimit=CLAHE_clip,
+            tileGridSize=(CLAHE_grid, CLAHE_grid))
+        img_fixed = clahe.apply(img_fixed)
+        img_moving = clahe.apply(img_moving)
 
     # Define termination criteria
     criteria = (
@@ -540,7 +552,9 @@ class PairwiseMatching(ArgSchemaParser):
                     'ophys_average_intensity_projection_image'],
                 self.args['registration_iterations'],
                 self.args['registration_precision'],
-                self.args['motionType'])
+                self.args['motionType'],
+                self.args['CLAHE_grid'],
+                self.args['CLAHE_clip'])
 
         if self.args['save_registered_image']:
             imfname = os.path.join(
