@@ -91,6 +91,16 @@ class CommonMatchingSchema(ArgSchema):
         description=("Establishes 6 settings to reproduce legacy results. "
                      "3 settings are in pairwise and 3 settings are in nway. "
                      "NOTE: some of these legacy settings are mistakes. "))
+    CLAHE_grid = Int(
+        required=False,
+        default=8,
+        missing=8,
+        description="tileGridSize for cv2 CLAHE, set to -1 to disable CLAHE")
+    CLAHE_clip = Float(
+        required=False,
+        default=2.5,
+        missing=2.5,
+        description="clipLimit for cv2 CLAHE")
 
     @mm.pre_load
     def set_common_legacy(self, data):
@@ -98,6 +108,7 @@ class CommonMatchingSchema(ArgSchema):
             data['integer_centroids'] = True
             data['iou_rounding'] = True
             data['assignment_solver'] = 'Hungarian-cpp'
+            data['CLAHE_grid'] = -1
 
     @mm.post_load
     def hungarian_warn(self, data):
