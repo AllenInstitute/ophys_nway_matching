@@ -56,7 +56,7 @@ def prune_matching_table_legacy(table, score):
     edge = np.zeros((linenum, linenum))
     node_exist = np.ones(linenum)
 
-    for i in range(linenum - 1):  # start from the second line
+    for i in range(linenum - 1):
         for j in range(i + 1, linenum):
             for k in range(expnum):
                 if (
