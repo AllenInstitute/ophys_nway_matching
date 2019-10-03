@@ -306,7 +306,11 @@ def calculate_cost_matrix(distance, iou, maximum_distance):
 
     """
     norm_dist = np.array(distance) / maximum_distance
-    norm_dist[norm_dist > 1] = 999.0
+    # NOTE for the Hungarian method, MAX_COST is high to be ignored
+    # relative to the typical cost range [0, 2]. For the Blossom method
+    # high costs will not populate the graph as possible edges
+    MAX_COST = 999.0
+    norm_dist[norm_dist > 1] = MAX_COST
     cost_matrix = norm_dist + (1.0 - np.array(iou))
     cost_matrix = pd.DataFrame(
             cost_matrix, distance.index.tolist(), distance.columns.tolist())
