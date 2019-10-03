@@ -55,7 +55,7 @@ class CommonMatchingSchema(ArgSchema):
         description=("Executable of Hungarian algorithm for bipartite"
                      "graph matching."))
     assignment_solver = Str(
-        required=True,
+        required=False,
         default="Blossom",
         missing="Blossom",
         validator=mm.validate.OneOf([
@@ -74,6 +74,11 @@ class CommonMatchingSchema(ArgSchema):
             "MOTION_AFFINE",
             "MOTION_HOMOGRAPHY"
             ]))
+    gaussFiltSize = Int(
+        required=False,
+        missing=5,
+        default=5,
+        description="passed to opencv findTransformECC")
     integer_centroids = Boolean(
         required=False,
         default=False,
@@ -133,7 +138,7 @@ class NwayMatchingSchema(CommonMatchingSchema):
         required=True,
         description="input json from segmentation output")
     output_directory = OutputDir(
-        required=True,
+        required=False,
         missing=None,
         default=None,
         description=("destination for output files. If None, will be set from "

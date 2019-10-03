@@ -33,7 +33,7 @@ def test_mask_from_json(experiments, legacy_label_order):
         assert len(mask.shape) == 3
         assert (
                 set(np.unique(mask[mask != 0])) ==
-                set(np.array(mdict.keys()).astype(int)))
+                set(np.array(list(mdict.keys())).astype(int)))
 
 
 @pytest.mark.parametrize("legacy_label_order", [True, False])

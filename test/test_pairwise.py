@@ -315,6 +315,7 @@ def test_register(input_file, tmpdir, motion, CLAHE_grid):
             1000,
             1.5e-7,
             motion,
+            5,
             CLAHE_grid,
             CLAHE_clip)
 
@@ -336,5 +337,6 @@ def test_register(input_file, tmpdir, motion, CLAHE_grid):
                     1000,
                     1.5e-7,
                     motion,
+                    5,
                     CLAHE_grid,
                     CLAHE_clip)

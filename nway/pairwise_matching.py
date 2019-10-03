@@ -440,7 +440,7 @@ def transform_mask(moving, dst_shape, tform):
 
 def register_intensity_images(
         img_path_fixed, img_path_moving, maxCount,
-        epsilon, motion_type, CLAHE_grid, CLAHE_clip):
+        epsilon, motion_type, gaussFiltSize, CLAHE_grid, CLAHE_clip):
     """find the transform that registers two images
 
     Parameters
@@ -455,6 +455,8 @@ def register_intensity_images(
         passed as epsilon to opencv termination criteria
     motion_type : str
         one of the 4 possible motion types for opencv findTransformECC
+    gaussFiltSize : int
+        passed to opencv findTransformECC()
     CLAHE_grid : int
         passed as tileGridSize to cv2.createCLAHE
     CLAHE_clip : int
@@ -506,7 +508,9 @@ def register_intensity_images(
                 img_moving,
                 warp_matrix,
                 cvmotion[motion_type],
-                criteria)
+                criteria,
+                None,
+                gaussFiltSize)
     except cv2.error:
         logger.error("failed to align images {} and {}".format(
             img_path_fixed,
@@ -557,6 +561,7 @@ class PairwiseMatching(ArgSchemaParser):
                 self.args['registration_iterations'],
                 self.args['registration_precision'],
                 self.args['motionType'],
+                self.args['gaussFiltSize'],
                 self.args['CLAHE_grid'],
                 self.args['CLAHE_clip'])
 
