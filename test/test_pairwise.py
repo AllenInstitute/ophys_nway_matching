@@ -109,7 +109,7 @@ def test_real_cost_data(input_file, tmpdir, solver):
             # stability assertions are true even when
             # using floats and IOUs
             'integer_centroids': False,
-            'iou_rounding': False,
+            'iou_flooring': False,
             'fixed': fixed,
             'moving': moving,
             'hungarian_executable': cppexe,
@@ -219,9 +219,9 @@ def test_region_properties(integer_centroids):
         np.array([ic1, ic2])))
 
 
-@pytest.mark.parametrize('iou_rounding', [True, False])
+@pytest.mark.parametrize('iou_flooring', [True, False])
 @pytest.mark.parametrize('integer_centroids', [True, False])
-def test_calc_distance_iou(iou_rounding, integer_centroids):
+def test_calc_distance_iou(iou_flooring, integer_centroids):
     mask1 = np.zeros((3, 100, 100)).astype('uint16')
     mask1[0, 40:50, 40:50] = 1
     mask1[1, 60:65, 30:35] = 2
@@ -248,7 +248,7 @@ def test_calc_distance_iou(iou_rounding, integer_centroids):
             dict1,
             dict2,
             integer_centroids=integer_centroids,
-            iou_rounding=iou_rounding)
+            iou_flooring=iou_flooring)
 
     assert set(distance.columns.tolist()) == set(dict2['mask_dict'].values())
     assert set(distance.index.tolist()) == set(dict1['mask_dict'].values())

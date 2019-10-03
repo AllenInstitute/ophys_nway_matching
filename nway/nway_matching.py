@@ -30,7 +30,7 @@ class NwayException(Exception):
     pass
 
 
-def prune_matching_table_legacy(matching_table_nway, score):
+def prune_matching_table_legacy(table, score):
     """eliminates match conflicts by comparing scores
 
     Parameters
@@ -47,23 +47,22 @@ def prune_matching_table_legacy(matching_table_nway, score):
         pruned version of the input table
 
     """
-    linenum = np.shape(matching_table_nway)[0]
-    expnum = np.shape(matching_table_nway)[1]
-    matching_table_nway_new = []
+    linenum = np.shape(table)[0]
+    expnum = np.shape(table)[1]
+    pruned = []
 
     # if two records share common elements in the
     # same column, then create an edge between them
     edge = np.zeros((linenum, linenum))
     node_exist = np.ones(linenum)
 
-    for i in range(linenum - 1):  # start from the second line
+    for i in range(linenum - 1):
         for j in range(i + 1, linenum):
             for k in range(expnum):
                 if (
-                       (matching_table_nway[j][k] ==
-                           matching_table_nway[i][k]) and
-                       (matching_table_nway[i][k] != -1) and
-                       (matching_table_nway[j][k] != -1)):
+                       (table[j][k] == table[i][k]) and
+                       (table[i][k] != -1) and
+                       (table[j][k] != -1)):
                     edge[i, j] = 1
                     break
 
@@ -74,13 +73,13 @@ def prune_matching_table_legacy(matching_table_nway, score):
             len_idx = len(idx)
             if len_idx == 0:  # no conflict with other matching
                 labelval = labelval + 1
-                matching_table_nway_new.append(matching_table_nway[i])
+                pruned.append(table[i])
 
             # score is the smallest, equal may lead
             # to conflict matching added to the list?
             elif score[i] <= np.min(score[idx]):
                 labelval = labelval + 1
-                matching_table_nway_new.append(matching_table_nway[i])
+                pruned.append(table[i])
 
                 # remove the nodes connected to it
                 # as they have worse scores
@@ -92,7 +91,7 @@ def prune_matching_table_legacy(matching_table_nway, score):
             else:  # prune the edge
                 edge[i, idx] = 0
 
-    return matching_table_nway_new
+    return pruned
 
 
 def subgraphs(G):
@@ -192,7 +191,7 @@ class NwayMatching(ArgSchemaParser):
     default_schema = NwayMatchingSchema
     default_output_schema = NwayMatchingOutputSchema
 
-    def parse_jsons(self, input_json):
+    def parse_data_json(self, input_data_json):
         """read the input json, populate the experiments
         with nice masks.
 
@@ -202,7 +201,7 @@ class NwayMatching(ArgSchemaParser):
             path to json file containing nway matching input
 
         """
-        with open(input_json, 'r') as f:
+        with open(input_data_json, 'r') as f:
             data = json.load(f)
 
         if self.args['output_directory'] is None:
@@ -416,7 +415,7 @@ class NwayMatching(ArgSchemaParser):
 
         return matching_table_nway_new
 
-    def create_output_json(self):
+    def create_output_dict(self):
         """write the nway matching results to a dict
 
         Returns
@@ -458,7 +457,7 @@ class NwayMatching(ArgSchemaParser):
            matching and then combining the results
         """
 
-        self.parse_jsons(self.args['input_json'])
+        self.parse_data_json(self.args['input_data_json'])
 
         # pair-wise matching
         self.pair_matches = []
@@ -487,8 +486,8 @@ class NwayMatching(ArgSchemaParser):
 
         logger.info("Nway matching is done!")
 
-        output_json = self.create_output_json()
-        self.output(output_json, indent=2)
+        output_dict = self.create_output_dict()
+        self.output(output_dict, indent=2)
         logger.info("wrote {}".format(self.args['output_json']))
 
 

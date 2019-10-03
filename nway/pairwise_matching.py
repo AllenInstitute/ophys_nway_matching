@@ -219,7 +219,7 @@ def region_properties(mask, mdict, integer_centroids=False):
 
 def calculate_distance_and_iou(
         mask1, mask2, dict1, dict2,
-        integer_centroids=False, iou_rounding=False):
+        integer_centroids=False, iou_flooring=False):
     """Compute distance and intersection-over-union
     for the labels in two masks
 
@@ -240,7 +240,7 @@ def calculate_distance_and_iou(
         mapping for mask2
     integer_centroids : bool
         force roi centroids to integers
-    iou_rounding : bool
+    iou_flooring : bool
         preserve legacy mistake of ious forced to zero
 
     Returns
@@ -268,7 +268,7 @@ def calculate_distance_and_iou(
         for j, jpix in enumerate(prop2['pixels']):
             intersection = len(ipix.intersection(jpix))
             union = len(ipix.union(jpix))
-            if iou_rounding:
+            if iou_flooring:
                 # NOTE
                 # the orginal was written in python 2 and
                 # the IOU calculation almost always gave 0 :(
@@ -306,7 +306,11 @@ def calculate_cost_matrix(distance, iou, maximum_distance):
 
     """
     norm_dist = np.array(distance) / maximum_distance
-    norm_dist[norm_dist > 1] = 999.0
+    # NOTE for the Hungarian method, MAX_COST is high to be ignored
+    # relative to the typical cost range [0, 2]. For the Blossom method
+    # high costs will not populate the graph as possible edges
+    MAX_COST = 999.0
+    norm_dist[norm_dist > 1] = MAX_COST
     cost_matrix = norm_dist + (1.0 - np.array(iou))
     cost_matrix = pd.DataFrame(
             cost_matrix, distance.index.tolist(), distance.columns.tolist())
@@ -315,7 +319,7 @@ def calculate_cost_matrix(distance, iou, maximum_distance):
 
 def cell_matching(
         mask1, mask2, dict1, dict2, max_dist, solver, hungarian_exe,
-        integer_centroids=False, iou_rounding=False):
+        integer_centroids=False, iou_flooring=False):
     """matching between 2 masks
 
     Parameters
@@ -345,7 +349,7 @@ def cell_matching(
        absolute path to compiled Hungarian executable
     integer_centroids : bool
         force roi centroids to integers
-    iou_rounding : bool
+    iou_flooring : bool
         preserve legacy mistake of ious forced to zero
 
     Returns
@@ -372,7 +376,7 @@ def cell_matching(
     distance, iou = calculate_distance_and_iou(
         mask1, mask2, dict1, dict2,
         integer_centroids=integer_centroids,
-        iou_rounding=iou_rounding)
+        iou_flooring=iou_flooring)
 
     cost_matrix = calculate_cost_matrix(distance, iou, max_dist)
 
@@ -589,7 +593,7 @@ class PairwiseMatching(ArgSchemaParser):
                     self.args['assignment_solver'],
                     self.args['hungarian_executable'],
                     integer_centroids=self.args['integer_centroids'],
-                    iou_rounding=self.args['iou_rounding'])
+                    iou_flooring=self.args['iou_flooring'])
 
         output_json = {
                 'matches': self.matches,
