@@ -129,6 +129,9 @@ class CommonMatchingSchema(ArgSchema):
 
 class NwayMatchingSchema(CommonMatchingSchema):
     ''' Class that uses argschema to take care of input arguments '''
+    input_data_json = InputFile(
+        required=True,
+        description="input json from segmentation output")
     output_directory = OutputDir(
         required=True,
         missing=None,

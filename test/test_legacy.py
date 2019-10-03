@@ -24,10 +24,10 @@ def input_file(tmpdir):
             template.render(
                 output_dir=output_dir,
                 test_files_dir=str(thistest)))
-    input_json = os.path.join(output_dir, 'input.json')
-    with open(input_json, 'w') as f:
+    input_data_json = os.path.join(output_dir, 'input.json')
+    with open(input_data_json, 'w') as f:
         json.dump(rendered, f, indent=2)
-    yield input_json
+    yield input_data_json
 
 
 def test_against_old_results(input_file):
@@ -40,7 +40,7 @@ def test_against_old_results(input_file):
         assert os.path.isfile(i['max_int_mask_image'])
 
     args = {}
-    args['input_json'] = input_file
+    args['input_data_json'] = input_file
     args['output_json'] = os.path.join(
             os.path.dirname(input_file), 'output.json')
     args['legacy'] = True

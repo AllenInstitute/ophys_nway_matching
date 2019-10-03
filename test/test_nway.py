@@ -16,6 +16,7 @@ TEST_FILE_DIR = os.path.join(
 cppexe = ("/shared/bioapps/infoapps/lims2_modules/"
           "CAM/ophys_ophys_registration/bp_matching")
 
+
 @pytest.fixture(scope='module')
 def table_to_prune():
     fname = os.path.join(
@@ -40,41 +41,41 @@ def input_file(tmpdir):
             template.render(
                 output_dir=output_dir,
                 test_files_dir=str(thistest)))
-    input_json = os.path.join(output_dir, 'input.json')
-    with open(input_json, 'w') as f:
+    input_data_json = os.path.join(output_dir, 'input.json')
+    with open(input_data_json, 'w') as f:
         json.dump(rendered, f, indent=2)
-    yield input_json
+    yield input_data_json
 
 
 def test_Nway_legacy_settings(input_file, tmpdir):
     output_dir = str(tmpdir.mkdir("nway_legacy_settings"))
     args = {
-            'input_json': input_file,
+            'input_data_json': input_file,
             'output_directory': output_dir,
             'assignment_solver': 'Blossom',
             'legacy': True
             }
     with pytest.raises(ValidationError):
         nwmatch = nway.NwayMatching(input_data=dict(args), args=[])
-    
+
     args['hungarian_executable'] = cppexe
     nwmatch = nway.NwayMatching(input_data=dict(args), args=[])
 
-    assert nwmatch.args['legacy_label_order'] == True
-    assert nwmatch.args['legacy_pruning_index_error'] == True
-    assert nwmatch.args['legacy_pruning_order_dependence'] == True
-    assert nwmatch.args['integer_centroids'] == True
-    assert nwmatch.args['iou_rounding'] == True
+    assert nwmatch.args['legacy_label_order']
+    assert nwmatch.args['legacy_pruning_index_error']
+    assert nwmatch.args['legacy_pruning_order_dependence']
+    assert nwmatch.args['integer_centroids']
+    assert nwmatch.args['iou_rounding']
     assert nwmatch.args['assignment_solver'] == 'Hungarian-cpp'
 
     args['legacy'] = False
     nwmatch = nway.NwayMatching(input_data=dict(args), args=[])
 
-    assert nwmatch.args['legacy_label_order'] == False
-    assert nwmatch.args['legacy_pruning_index_error'] == False
-    assert nwmatch.args['legacy_pruning_order_dependence'] == False
-    assert nwmatch.args['integer_centroids'] == False
-    assert nwmatch.args['iou_rounding'] == False
+    assert not nwmatch.args['legacy_label_order']
+    assert not nwmatch.args['legacy_pruning_index_error']
+    assert not nwmatch.args['legacy_pruning_order_dependence']
+    assert not nwmatch.args['integer_centroids']
+    assert not nwmatch.args['iou_rounding']
     assert nwmatch.args['assignment_solver'] == 'Blossom'
 
 
@@ -82,13 +83,13 @@ def test_nway_exception(tmpdir, input_file):
     with open(input_file, 'r') as f:
         j = json.load(f)
     j['experiment_containers']['ophys_experiments'] = \
-            [j['experiment_containers']['ophys_experiments'][0]]
+        [j['experiment_containers']['ophys_experiments'][0]]
     output_dir = str(tmpdir.mkdir("nway_exception"))
     tmpinput = os.path.join(output_dir, 'tmp.json')
     with open(tmpinput, 'w') as f:
         json.dump(j, f)
     args = {
-            'input_json': tmpinput,
+            'input_data_json': tmpinput,
             'output_directory': output_dir,
             'assignment_solver': 'Blossom',
             }
@@ -100,7 +101,7 @@ def test_nway_exception(tmpdir, input_file):
 
 def test_default_nway(input_file):
     args = {}
-    args['input_json'] = input_file
+    args['input_data_json'] = input_file
     args['output_json'] = os.path.join(
             os.path.dirname(input_file), 'output.json')
     n = nway.NwayMatching(input_data=args, args=[])
@@ -143,6 +144,7 @@ def iou(set1, set2):
     i = float(len(set1.intersection(set2)))
     u = len(set1.union(set2))
     return i / u
+
 
 @pytest.mark.parametrize(
         'legacy, method',
