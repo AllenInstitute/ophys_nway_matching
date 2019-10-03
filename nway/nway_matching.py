@@ -30,7 +30,7 @@ class NwayException(Exception):
     pass
 
 
-def prune_matching_table_legacy(matching_table_nway, score):
+def prune_matching_table_legacy(table, score):
     """eliminates match conflicts by comparing scores
 
     Parameters
@@ -47,9 +47,9 @@ def prune_matching_table_legacy(matching_table_nway, score):
         pruned version of the input table
 
     """
-    linenum = np.shape(matching_table_nway)[0]
-    expnum = np.shape(matching_table_nway)[1]
-    matching_table_nway_new = []
+    linenum = np.shape(table)[0]
+    expnum = np.shape(table)[1]
+    pruned = []
 
     # if two records share common elements in the
     # same column, then create an edge between them
@@ -60,10 +60,9 @@ def prune_matching_table_legacy(matching_table_nway, score):
         for j in range(i + 1, linenum):
             for k in range(expnum):
                 if (
-                       (matching_table_nway[j][k] ==
-                           matching_table_nway[i][k]) and
-                       (matching_table_nway[i][k] != -1) and
-                       (matching_table_nway[j][k] != -1)):
+                       (table[j][k] == table[i][k]) and
+                       (table[i][k] != -1) and
+                       (table[j][k] != -1)):
                     edge[i, j] = 1
                     break
 
@@ -74,13 +73,13 @@ def prune_matching_table_legacy(matching_table_nway, score):
             len_idx = len(idx)
             if len_idx == 0:  # no conflict with other matching
                 labelval = labelval + 1
-                matching_table_nway_new.append(matching_table_nway[i])
+                pruned.append(table[i])
 
             # score is the smallest, equal may lead
             # to conflict matching added to the list?
             elif score[i] <= np.min(score[idx]):
                 labelval = labelval + 1
-                matching_table_nway_new.append(matching_table_nway[i])
+                pruned.append(table[i])
 
                 # remove the nodes connected to it
                 # as they have worse scores
@@ -92,7 +91,7 @@ def prune_matching_table_legacy(matching_table_nway, score):
             else:  # prune the edge
                 edge[i, idx] = 0
 
-    return matching_table_nway_new
+    return pruned
 
 
 def subgraphs(G):
