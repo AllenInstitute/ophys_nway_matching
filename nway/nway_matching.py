@@ -415,7 +415,7 @@ class NwayMatching(ArgSchemaParser):
 
         return matching_table_nway_new
 
-    def create_output_json(self):
+    def create_output_dict(self):
         """write the nway matching results to a dict
 
         Returns
@@ -486,8 +486,8 @@ class NwayMatching(ArgSchemaParser):
 
         logger.info("Nway matching is done!")
 
-        output_json = self.create_output_json()
-        self.output(output_json, indent=2)
+        output_dict = self.create_output_dict()
+        self.output(output_dict, indent=2)
         logger.info("wrote {}".format(self.args['output_json']))
 
 
