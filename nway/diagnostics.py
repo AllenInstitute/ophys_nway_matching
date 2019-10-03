@@ -93,10 +93,9 @@ def some_grid(n):
         shape for new grid
 
     """
-    nrow = np.int(np.sqrt(n))
-    ncol = nrow - 1
-    while (ncol * nrow) < n:
-        ncol += 1
+    nrow = int(np.floor(np.sqrt(n)))
+    # NOTE float cast for python 2.7
+    ncol = int(np.ceil(float(n) / nrow))
     return (nrow, ncol)
 
 
