@@ -79,7 +79,7 @@ class CommonMatchingSchema(ArgSchema):
         default=False,
         missing=False,
         description="round ROI centroids to integer values")
-    iou_rounding = Boolean(
+    iou_flooring = Boolean(
         required=False,
         default=False,
         missing=False,
@@ -106,7 +106,7 @@ class CommonMatchingSchema(ArgSchema):
     def set_common_legacy(self, data):
         if data['legacy']:
             data['integer_centroids'] = True
-            data['iou_rounding'] = True
+            data['iou_flooring'] = True
             data['assignment_solver'] = 'Hungarian-cpp'
             data['CLAHE_grid'] = -1
 

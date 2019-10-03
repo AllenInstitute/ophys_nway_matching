@@ -65,7 +65,7 @@ def test_Nway_legacy_settings(input_file, tmpdir):
     assert nwmatch.args['legacy_pruning_index_error']
     assert nwmatch.args['legacy_pruning_order_dependence']
     assert nwmatch.args['integer_centroids']
-    assert nwmatch.args['iou_rounding']
+    assert nwmatch.args['iou_flooring']
     assert nwmatch.args['assignment_solver'] == 'Hungarian-cpp'
 
     args['legacy'] = False
@@ -75,7 +75,7 @@ def test_Nway_legacy_settings(input_file, tmpdir):
     assert not nwmatch.args['legacy_pruning_index_error']
     assert not nwmatch.args['legacy_pruning_order_dependence']
     assert not nwmatch.args['integer_centroids']
-    assert not nwmatch.args['iou_rounding']
+    assert not nwmatch.args['iou_flooring']
     assert nwmatch.args['assignment_solver'] == 'Blossom'
 
 
