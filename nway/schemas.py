@@ -134,15 +134,13 @@ class CommonMatchingSchema(ArgSchema):
 
 class NwayMatchingSchema(CommonMatchingSchema):
     ''' Class that uses argschema to take care of input arguments '''
-    input_data_json = InputFile(
-        required=True,
-        description="input json from segmentation output")
     output_directory = OutputDir(
-        required=False,
-        missing=None,
-        default=None,
+        required=True,
         description=("destination for output files. If None, will be set from "
                      "output_directory field in input file"))
+    experiment_containers = Dict(
+        required=True,
+        description="contains data for matching")
     save_pairwise_results = Boolean(
         required=False,
         default=False,
