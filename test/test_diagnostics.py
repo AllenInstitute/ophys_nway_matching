@@ -7,6 +7,7 @@ import nway.diagnostics as nwdi
 import os
 import PyPDF2
 import shutil
+import json
 
 TEST_FILE_DIR = os.path.join(
         os.path.dirname(os.path.abspath(__file__)),
@@ -20,6 +21,16 @@ def new_output():
             "test0",
             "new_output.json")
     yield ojpath
+
+
+def test_cell_lookup(new_output):
+    cell_lookup = nwdi.cell_experiment_dict(new_output)
+    cells = list(cell_lookup.keys())
+    with open(new_output, 'r') as f:
+        outj = json.load(f)
+    for match in outj['nway_matches']:
+        for cell_id in match:
+            assert cell_id in cells
 
 
 def test_pairwise_transforms(new_output):
