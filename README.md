@@ -1,3 +1,4 @@
+![Build Status](http://bamboo.corp.alleninstitute.org/plugins/servlet/wittified/build-status/IFR-OP)
 [![codecov](https://codecov.io/gh/AllenInstitute/ophys_nway_matching/branch/master/graph/badge.svg?token=y5Nt5RnMwB)](https://codecov.io/gh/AllenInstitute/ophys_nway_matching)
 
 # ophys_nway_matching
