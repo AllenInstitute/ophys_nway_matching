@@ -4,11 +4,10 @@
 N-way matching of segmented cell ROIs
 
 # quick start
-(original code is python 2.7. TODO, update to python 3)
 
 ```
-conda create -n testpy27 python=2.7
-conda activate testpy27
+conda create -n nwaytest python=3.6.4
+conda activate nwaytest
 pip install git+https://github.com/AllenInstitute/ophys_nway_matching
 python -m nway.nway_matching --input_json tmp_example/input.json --output_json tmp_example/output.json
 ```
