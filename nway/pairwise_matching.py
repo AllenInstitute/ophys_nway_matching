@@ -370,6 +370,9 @@ def cell_matching(
     rejected : list of dict
         list of pairs within max_dist threshold which were not chosen
         same structure as matches
+    unmatched : dict
+        list of cell IDs from fixed and moving experiments that were
+        never considered for a pair
 
     """
 
@@ -389,7 +392,19 @@ def cell_matching(
             iou,
             max_dist)
 
-    return cost_matrix, matches, rejected
+    # catalog what did not get paired at all
+    paired_fixed_ids = [i['fixed'] for i in matches] + \
+        [i['fixed'] for i in rejected]
+    paired_moving_ids = [i['moving'] for i in matches] + \
+        [i['moving'] for i in rejected]
+    unmatched = {
+            'fixed': [i for i in dict1['mask_dict'].values()
+                      if i not in paired_fixed_ids],
+            'moving': [i for i in dict2['mask_dict'].values()
+                       if i not in paired_moving_ids]
+            }
+
+    return cost_matrix, matches, rejected, unmatched
 
 
 def transform_mask(moving, dst_shape, tform):
@@ -589,7 +604,8 @@ class PairwiseMatching(ArgSchemaParser):
             moving_dict = json.load(f)
 
         # matching cells
-        self.cost_matrix, self.matches, self.rejected = cell_matching(
+        self.cost_matrix, self.matches, self.rejected, self.unmatched = \
+            cell_matching(
                     segmask_fixed_3d,
                     segmask_moving_3d_registered,
                     fixed_dict,
@@ -601,6 +617,7 @@ class PairwiseMatching(ArgSchemaParser):
                     iou_flooring=self.args['iou_flooring'])
 
         output_json = {
+                'unmatched': self.unmatched,
                 'matches': self.matches,
                 'rejected': self.rejected,
                 'fixed_experiment': self.args['fixed']['id'],

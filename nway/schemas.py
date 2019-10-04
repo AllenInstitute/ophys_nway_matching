@@ -222,6 +222,9 @@ class PairwiseOutputSchema(DefaultSchema):
         Dict,
         required=True,
         description="pairs within max_distance, but not matched")
+    unmatched = Dict(
+        required=True,
+        description="list of cell IDs that were never in a considered pair")
 
 
 class NwayDiagnosticSchema(ArgSchema):
