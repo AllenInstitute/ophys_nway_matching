@@ -7,6 +7,7 @@ from marshmallow import ValidationError
 import numpy as np
 import itertools
 from functools import partial
+import copy
 
 
 TEST_FILE_DIR = os.path.join(
@@ -41,20 +42,16 @@ def input_file(tmpdir):
             template.render(
                 output_dir=output_dir,
                 test_files_dir=str(thistest)))
-    input_data_json = os.path.join(output_dir, 'input.json')
-    with open(input_data_json, 'w') as f:
-        json.dump(rendered, f, indent=2)
-    yield input_data_json
+    yield rendered
 
 
 def test_Nway_legacy_settings(input_file, tmpdir):
     output_dir = str(tmpdir.mkdir("nway_legacy_settings"))
-    args = {
-            'input_data_json': input_file,
-            'output_directory': output_dir,
-            'assignment_solver': 'Blossom',
-            'legacy': True
-            }
+    args = copy.deepcopy(input_file)
+    args['output_directory'] = output_dir
+    args['assignment_solver'] = 'Blossom'
+    args['legacy'] = True
+
     with pytest.raises(ValidationError):
         nwmatch = nway.NwayMatching(input_data=dict(args), args=[])
 
@@ -80,30 +77,22 @@ def test_Nway_legacy_settings(input_file, tmpdir):
 
 
 def test_nway_exception(tmpdir, input_file):
-    with open(input_file, 'r') as f:
-        j = json.load(f)
-    j['experiment_containers']['ophys_experiments'] = \
-        [j['experiment_containers']['ophys_experiments'][0]]
+    args = copy.deepcopy(input_file)
+    args['experiment_containers']['ophys_experiments'] = \
+        [args['experiment_containers']['ophys_experiments'][0]]
     output_dir = str(tmpdir.mkdir("nway_exception"))
-    tmpinput = os.path.join(output_dir, 'tmp.json')
-    with open(tmpinput, 'w') as f:
-        json.dump(j, f)
-    args = {
-            'input_data_json': tmpinput,
-            'output_directory': output_dir,
-            'assignment_solver': 'Blossom',
-            }
+    args['output_directory'] = output_dir
+    args['assignment_solver'] = 'Blossom'
 
     nwmatch = nway.NwayMatching(input_data=args, args=[])
     with pytest.raises(nway.NwayException):
         nwmatch.run()
 
 
-def test_default_nway(input_file):
-    args = {}
-    args['input_data_json'] = input_file
-    args['output_json'] = os.path.join(
-            os.path.dirname(input_file), 'output.json')
+def test_default_nway(tmpdir, input_file):
+    args = copy.deepcopy(input_file)
+    output_dir = str(tmpdir.mkdir("nway_default"))
+    args['output_json'] = os.path.join(output_dir, 'output.json')
     n = nway.NwayMatching(input_data=args, args=[])
 
     assert n.args['assignment_solver'] == 'Blossom'
@@ -117,9 +106,7 @@ def test_default_nway(input_file):
     nave = np.array([len(i) for i in oj['nway_matches']]).mean()
     assert nave > 1.5
 
-    with open(input_file, 'r') as f:
-        inj = json.load(f)
-    nexp = len(inj['experiment_containers']['ophys_experiments'])
+    nexp = len(args['experiment_containers']['ophys_experiments'])
 
     npairs = int(nexp * (nexp - 1) / 2)
 

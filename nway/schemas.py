@@ -55,7 +55,7 @@ class CommonMatchingSchema(ArgSchema):
         description=("Executable of Hungarian algorithm for bipartite"
                      "graph matching."))
     assignment_solver = Str(
-        required=True,
+        required=False,
         default="Blossom",
         missing="Blossom",
         validator=mm.validate.OneOf([
@@ -74,6 +74,11 @@ class CommonMatchingSchema(ArgSchema):
             "MOTION_AFFINE",
             "MOTION_HOMOGRAPHY"
             ]))
+    gaussFiltSize = Int(
+        required=False,
+        missing=5,
+        default=5,
+        description="passed to opencv findTransformECC")
     integer_centroids = Boolean(
         required=False,
         default=False,
@@ -129,15 +134,13 @@ class CommonMatchingSchema(ArgSchema):
 
 class NwayMatchingSchema(CommonMatchingSchema):
     ''' Class that uses argschema to take care of input arguments '''
-    input_data_json = InputFile(
-        required=True,
-        description="input json from segmentation output")
     output_directory = OutputDir(
         required=True,
-        missing=None,
-        default=None,
         description=("destination for output files. If None, will be set from "
                      "output_directory field in input file"))
+    experiment_containers = Dict(
+        required=True,
+        description="contains data for matching")
     save_pairwise_results = Boolean(
         required=False,
         default=False,
@@ -219,6 +222,9 @@ class PairwiseOutputSchema(DefaultSchema):
         Dict,
         required=True,
         description="pairs within max_distance, but not matched")
+    unmatched = Dict(
+        required=True,
+        description="list of cell IDs that were never in a considered pair")
 
 
 class NwayDiagnosticSchema(ArgSchema):

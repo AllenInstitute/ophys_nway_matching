@@ -9,6 +9,36 @@ from nway.schemas import NwayDiagnosticSchema
 import os
 
 
+def cell_experiment_dict(nway_output_path):
+    """lookup dict for experiment by cell ID
+
+    Parameters
+    ----------
+    nway_output_path : str
+        path to output json from NwayMatching
+
+    Returns
+    -------
+    lookup : dict
+        dictionary with "cellID": "experimentID"
+
+    """
+    with open(nway_output_path, 'r') as f:
+        j = json.load(f)
+    lookup = {}
+    for pw in j['pairwise_results']:
+        print(list(pw.keys()))
+        for k in ['rejected', 'matches']:
+            for pair in pw[k]:
+                lookup[pair['fixed']] = pw['fixed_experiment']
+                lookup[pair['moving']] = pw['moving_experiment']
+        for cellid in pw['unmatched']['fixed']:
+            lookup[cellid] = pw['fixed_experiment']
+        for cellid in pw['unmatched']['moving']:
+            lookup[cellid] = pw['moving_experiment']
+    return lookup
+
+
 def pairwise_transforms(
         nway_output_path, fig=None, subplot_spec=None, fontsize=6):
     """summarize transform parameters and optionally plot

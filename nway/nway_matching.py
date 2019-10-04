@@ -191,7 +191,7 @@ class NwayMatching(ArgSchemaParser):
     default_schema = NwayMatchingSchema
     default_output_schema = NwayMatchingOutputSchema
 
-    def parse_data_json(self, input_data_json):
+    def make_masks_from_dicts(self):
         """read the input json, populate the experiments
         with nice masks.
 
@@ -201,14 +201,8 @@ class NwayMatching(ArgSchemaParser):
             path to json file containing nway matching input
 
         """
-        with open(input_data_json, 'r') as f:
-            data = json.load(f)
-
-        if self.args['output_directory'] is None:
-            self.args['output_directory'] = str(data['output_directory'])
-
         self.experiments = []
-        for exp in data['experiment_containers']['ophys_experiments']:
+        for exp in self.args['experiment_containers']['ophys_experiments']:
             self.experiments.append(
                     utils.create_nice_mask(
                         exp,
@@ -457,7 +451,7 @@ class NwayMatching(ArgSchemaParser):
            matching and then combining the results
         """
 
-        self.parse_data_json(self.args['input_data_json'])
+        self.make_masks_from_dicts()
 
         # pair-wise matching
         self.pair_matches = []
