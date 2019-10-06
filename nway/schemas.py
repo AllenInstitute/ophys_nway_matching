@@ -66,8 +66,8 @@ class CommonMatchingSchema(ArgSchema):
                      " in pairwise matching"))
     motionType = Str(
         required=False,
-        missing="MOTION_AFFINE",
-        default="MOTION_AFFINE",
+        missing="MOTION_EUCLIDEAN",
+        default="MOTION_EUCLIDEAN",
         validator=mm.validate.OneOf([
             "MOTION_TRANSLATION",
             "MOTION_EUCLIDEAN",
@@ -114,6 +114,7 @@ class CommonMatchingSchema(ArgSchema):
             data['iou_flooring'] = True
             data['assignment_solver'] = 'Hungarian-cpp'
             data['CLAHE_grid'] = -1
+            data['motionType'] = 'MOTION_AFFINE'
 
     @mm.post_load
     def hungarian_warn(self, data):
