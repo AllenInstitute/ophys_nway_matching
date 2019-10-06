@@ -66,8 +66,8 @@ class CommonMatchingSchema(ArgSchema):
                      " in pairwise matching"))
     motionType = Str(
         required=False,
-        missing="MOTION_AFFINE",
-        default="MOTION_AFFINE",
+        missing="MOTION_EUCLIDEAN",
+        default="MOTION_EUCLIDEAN",
         validator=mm.validate.OneOf([
             "MOTION_TRANSLATION",
             "MOTION_EUCLIDEAN",
