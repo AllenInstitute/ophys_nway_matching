@@ -11,9 +11,6 @@ TEST_FILE_DIR = os.path.join(
         os.path.dirname(os.path.abspath(__file__)),
         'test_files')
 
-cppexe = ("/shared/bioapps/infoapps/lims2_modules/"
-          "CAM/ophys_ophys_registration/bp_matching")
-
 
 @pytest.fixture(scope='module')
 def table_to_prune():
