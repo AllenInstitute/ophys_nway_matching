@@ -3,10 +3,7 @@ import nway.nway_matching as nway
 import os
 from jinja2 import Template
 import json
-from marshmallow import ValidationError
 import numpy as np
-import itertools
-from functools import partial
 import copy
 
 
@@ -45,37 +42,6 @@ def input_file(tmpdir):
     yield rendered
 
 
-def test_Nway_legacy_settings(input_file, tmpdir):
-    output_dir = str(tmpdir.mkdir("nway_legacy_settings"))
-    args = copy.deepcopy(input_file)
-    args['output_directory'] = output_dir
-    args['assignment_solver'] = 'Blossom'
-    args['legacy'] = True
-
-    with pytest.raises(ValidationError):
-        nwmatch = nway.NwayMatching(input_data=dict(args), args=[])
-
-    args['hungarian_executable'] = cppexe
-    nwmatch = nway.NwayMatching(input_data=dict(args), args=[])
-
-    assert nwmatch.args['legacy_label_order']
-    assert nwmatch.args['legacy_pruning_index_error']
-    assert nwmatch.args['legacy_pruning_order_dependence']
-    assert nwmatch.args['integer_centroids']
-    assert nwmatch.args['iou_flooring']
-    assert nwmatch.args['assignment_solver'] == 'Hungarian-cpp'
-
-    args['legacy'] = False
-    nwmatch = nway.NwayMatching(input_data=dict(args), args=[])
-
-    assert not nwmatch.args['legacy_label_order']
-    assert not nwmatch.args['legacy_pruning_index_error']
-    assert not nwmatch.args['legacy_pruning_order_dependence']
-    assert not nwmatch.args['integer_centroids']
-    assert not nwmatch.args['iou_flooring']
-    assert nwmatch.args['assignment_solver'] == 'Blossom'
-
-
 def test_nway_exception(tmpdir, input_file):
     args = copy.deepcopy(input_file)
     args['experiment_containers']['ophys_experiments'] = \
@@ -89,10 +55,12 @@ def test_nway_exception(tmpdir, input_file):
         nwmatch.run()
 
 
-def test_default_nway(tmpdir, input_file):
+@pytest.mark.parametrize('greduce', ['keepmin', 'popmax'])
+def test_default_nway(tmpdir, input_file, greduce):
     args = copy.deepcopy(input_file)
     output_dir = str(tmpdir.mkdir("nway_default"))
     args['output_json'] = os.path.join(output_dir, 'output.json')
+    args['pruning_method'] = greduce
     n = nway.NwayMatching(input_data=args, args=[])
 
     assert n.args['assignment_solver'] == 'Blossom'
@@ -111,49 +79,3 @@ def test_default_nway(tmpdir, input_file):
     npairs = int(nexp * (nexp - 1) / 2)
 
     assert npairs == len(oj['pairwise_results'])
-
-
-def shuffle(table, score):
-    ind = np.arange(len(table))
-    np.random.shuffle(ind)
-    ntable = [table[i] for i in ind]
-    return ntable, score[ind]
-
-
-def get_sets(table, old=False):
-    x = []
-    for t in table:
-        x.append(tuple([i for i in t if i != -1]))
-    return set(x)
-
-
-def iou(set1, set2):
-    i = float(len(set1.intersection(set2)))
-    u = len(set1.union(set2))
-    return i / u
-
-
-@pytest.mark.parametrize(
-        'legacy, method',
-        [(True, None), (False, "keepmin"), (False, "popmax")])
-def test_pruning_legacy(table_to_prune, legacy, method):
-    # demonstration that legacy pruning is unstable under
-    # permutations
-    if legacy:
-        fprune = nway.prune_matching_table_legacy
-    else:
-        fprune = partial(nway.prune_matching_table, method=method)
-
-    table, score = table_to_prune
-    sets = []
-    ntrials = 5
-    for i in range(ntrials):
-        table, score = shuffle(table, score)
-        pruned = fprune(table, score)
-        sets.append(get_sets(pruned))
-
-    ious = np.array([iou(a, b) for a, b in itertools.combinations(sets, 2)])
-    if legacy:
-        assert (0.8 < ious.mean() < 0.9)
-    else:
-        assert np.all(ious == 1.0)

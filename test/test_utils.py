@@ -25,52 +25,25 @@ def experiments(tmpdir):
     yield rendered['experiment_containers']['ophys_experiments']
 
 
-@pytest.mark.parametrize("legacy_label_order", [True, False])
-def test_mask_from_json(experiments, legacy_label_order):
+def test_mask_from_json(experiments):
     for exp in experiments:
-        mask, mdict = utils.labeled_mask_from_experiment(
-                exp, legacy_label_order=legacy_label_order)
+        mask, mdict = utils.labeled_mask_from_experiment(exp)
         assert len(mask.shape) == 3
         assert (
                 set(np.unique(mask[mask != 0])) ==
                 set(np.array(list(mdict.keys())).astype(int)))
 
 
-@pytest.mark.parametrize("legacy_label_order", [True, False])
-def test_create_nice_mask(experiments, legacy_label_order, tmpdir):
+def test_create_nice_mask(experiments, tmpdir):
     exp = experiments[0]
-    output_dir = str(
-            tmpdir.mkdir("nice_mask_legacy_%s" % str(legacy_label_order)))
-    nice_exp = utils.create_nice_mask(
-            exp, output_dir, legacy_label_order=legacy_label_order)
+    output_dir = str(tmpdir.mkdir("nice_mask"))
+    nice_exp = utils.create_nice_mask(exp, output_dir)
     for k in exp:
         assert k in nice_exp
         assert exp[k] == nice_exp[k]
     for k in ['nice_mask_path', 'nice_dict_path']:
         assert k in nice_exp
         assert os .path.isfile(nice_exp[k])
-
-
-@pytest.mark.parametrize("legacy_label_order", [True, False])
-def test_relabel(experiments, legacy_label_order):
-    for exp in experiments:
-        mask, _ = utils.labeled_mask_from_experiment(
-                exp, legacy_label_order=legacy_label_order)
-        remask = utils.relabel(mask)
-        umask = np.unique(remask)
-        assert np.unique(mask).size == umask.size
-        assert mask.shape == remask.shape
-        if legacy_label_order:
-            assert np.all(umask == np.arange(umask.size))
-
-
-def test_too_many_labels():
-    mask = np.zeros(50 * 1000 * 1000)
-    inds = np.random.choice(np.arange(mask.size), int(mask.size * 0.05))
-    mask[inds] = 1
-    mask = mask.reshape(50, 1000, 1000)
-    with pytest.raises(AssertionError):
-        utils.relabel(mask)
 
 
 def test_row_col():
