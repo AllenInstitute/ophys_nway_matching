@@ -30,70 +30,6 @@ class NwayException(Exception):
     pass
 
 
-def prune_matching_table_legacy(table, score):
-    """eliminates match conflicts by comparing scores
-
-    Parameters
-    ----------
-    table : list
-        list (len = n_match_candidates) of numpy arrays (size = n_experiment)
-        containing either cellIDs or -1
-    score : :class:`numpy.ndarray`
-        size = n_match_candidates, a float score value for each candidat
-
-    Returns
-    -------
-    pruned : list
-        pruned version of the input table
-
-    """
-    linenum = np.shape(table)[0]
-    expnum = np.shape(table)[1]
-    pruned = []
-
-    # if two records share common elements in the
-    # same column, then create an edge between them
-    edge = np.zeros((linenum, linenum))
-    node_exist = np.ones(linenum)
-
-    for i in range(linenum - 1):
-        for j in range(i + 1, linenum):
-            for k in range(expnum):
-                if (
-                       (table[j][k] == table[i][k]) and
-                       (table[i][k] != -1) and
-                       (table[j][k] != -1)):
-                    edge[i, j] = 1
-                    break
-
-    labelval = 0
-    for i in range(linenum):
-        if node_exist[i] == 1:
-            idx = np.argwhere(edge[i, :] == 1)
-            len_idx = len(idx)
-            if len_idx == 0:  # no conflict with other matching
-                labelval = labelval + 1
-                pruned.append(table[i])
-
-            # score is the smallest, equal may lead
-            # to conflict matching added to the list?
-            elif score[i] <= np.min(score[idx]):
-                labelval = labelval + 1
-                pruned.append(table[i])
-
-                # remove the nodes connected to it
-                # as they have worse scores
-                edge[i, idx] = 0
-                for k in range(len_idx):
-                    edge[idx[k], :] = 0
-                node_exist[idx] = 0
-
-            else:  # prune the edge
-                edge[i, idx] = 0
-
-    return pruned
-
-
 def subgraphs(G):
     """returns connected component subgraphs. Replaces deprecated
     nx.connected_component_subgraphs()
@@ -206,8 +142,7 @@ class NwayMatching(ArgSchemaParser):
             self.experiments.append(
                     utils.create_nice_mask(
                         exp,
-                        self.args['output_directory'],
-                        legacy_label_order=self.args['legacy_label_order']))
+                        self.args['output_directory']))
 
         if len(self.experiments) < 2:
             raise NwayException("Need at least 2 experiements from input")
@@ -350,26 +285,14 @@ class NwayMatching(ArgSchemaParser):
             for i in range(nline):
                 col = matching_table_nway[i][pcol]
                 row = matching_table_nway[i][prow]
-                if self.args['legacy_pruning_index_error']:
-                    # indexing mistake in original code
-                    if col == -1:
-                        col = pair.cost_matrix.columns[-2]
-                    if row == -1:
-                        row = pair.cost_matrix.index[-2]
-                    pscore = pair.cost_matrix[col][row]
+                if (row, col) in candidates:
+                    pscore = candidates[(row, col)]
                 else:
-                    if (row, col) in candidates:
-                        pscore = candidates[(row, col)]
-                    else:
-                        pscore = 1000
+                    pscore = 1000
                 score[i] += pscore
 
-        if self.args['legacy_pruning_order_dependence']:
-            matching_table_nway_new = prune_matching_table_legacy(
-                    matching_table_nway, score)
-        else:
-            matching_table_nway_new = prune_matching_table(
-                    matching_table_nway, score, self.args['pruning_method'])
+        matching_table_nway_new = prune_matching_table(
+                matching_table_nway, score, self.args['pruning_method'])
 
         return matching_table_nway_new
 

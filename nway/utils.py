@@ -1,14 +1,11 @@
 import numpy as np
-from skimage import measure
 from skimage.transform import AffineTransform
 import PIL
-import logging
 import os
 import json
 
 
-def create_nice_mask(
-        experiment, output_directory, legacy_label_order=False):
+def create_nice_mask(experiment, output_directory):
     """create a labeled mask from the input json experiment and a translation
     dict to cell IDs, save them to disk, and add their paths to the experiment
     json.
@@ -25,8 +22,6 @@ def create_nice_mask(
         'stimulus_name' : str/Null
     output_directory : str
         destination directory for writing masks and translation dicts
-    legacy_label_order : bool
-        passed to labeled_mask_from_experiment()
 
     Returns
     -------
@@ -37,8 +32,7 @@ def create_nice_mask(
 
     """
 
-    nice_mask, mask_dict = labeled_mask_from_experiment(
-            experiment, legacy_label_order=legacy_label_order)
+    nice_mask, mask_dict = labeled_mask_from_experiment(experiment)
 
     mask_path = os.path.join(
             output_directory,
@@ -64,49 +58,6 @@ def create_nice_mask(
     experiment['nice_dict_path'] = dict_path
 
     return experiment
-
-
-def relabel(maskimg_3d):
-    """relabel mask to make labels continuous and unique.
-    This function is not necessary, except for legacy order-
-    dependent results. But, it does no harm
-
-    Parameters
-    ----------
-    maskimg_3d : :class:`numpy.ndarray`
-        depth x n x m, dtype int for passing to skimage.measure.label
-        typically uint32 from LIMS cell labels
-
-    Returns
-    -------
-    remask : :class:`numpy.ndarray`
-        depth x n x m dtype int
-        concatenated layers of skimage.measure.label with accumulated
-        label offset per layer. Forced to uint16 as this will be
-        stored as tiff.
-
-    """
-
-    remask = np.copy(maskimg_3d)
-    num_images = np.shape(remask)[0]
-    labeloffset = 0
-
-    for k in range(0, num_images):
-        # NOTE
-        # scikit.measure.label merges ROIs that touch
-        # assumption is that touching ROIs are in different layers
-        labelimg = measure.label((remask[k, :, :] > 0))
-        labelimg[labelimg > 0] = labelimg[labelimg > 0] + labeloffset
-        remask[k, :, :] = labelimg
-        labeloffset = np.amax(labelimg)
-
-    try:
-        assert remask.max() < 2**16
-    except AssertionError:
-        logging.error("the mask has more than 2^16 labeled regions")
-        raise
-
-    return np.uint16(remask)
 
 
 def row_col_from_roi(roi):
@@ -139,7 +90,7 @@ def row_col_from_roi(roi):
     return masked
 
 
-def labeled_mask_from_experiment(exp, legacy_label_order=False):
+def labeled_mask_from_experiment(exp):
     """create a labeled mask and to-cell-id dictionary
     from the experiment json
 
@@ -187,19 +138,6 @@ def labeled_mask_from_experiment(exp, legacy_label_order=False):
 
     # do not list the background
     rdict.pop("0")
-
-    # NOTE: above labeling should work on its own
-    # but, some legacy order-dependence with the
-    # Hungarian method requires the following ordering
-    # Hungarian method is not recommended
-    if legacy_label_order:
-        relabeled = relabel(relabeled)
-        rdict = {}
-        for k in np.unique(relabeled)[1:]:
-            ind = np.nonzero(relabeled == k)
-            mi = mask[ind].flatten()
-            assert np.unique(mi).size == 1
-            rdict[str(k)] = int(mi[0])
 
     return relabeled, rdict
 
