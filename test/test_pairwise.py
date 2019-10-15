@@ -14,9 +14,6 @@ TEST_FILE_DIR = os.path.join(
         os.path.dirname(os.path.abspath(__file__)),
         'test_files')
 
-cppexe = ("/shared/bioapps/infoapps/lims2_modules/"
-          "CAM/ophys_ophys_registration/bp_matching")
-
 
 @pytest.fixture(scope='function')
 def input_file(tmpdir):
@@ -54,7 +51,7 @@ def shuffle_dataframe(df):
 
 
 @pytest.mark.parametrize('shuffle, niter', zip([True, False], [20, 1]))
-@pytest.mark.parametrize('solver', ['Hungarian', 'Hungarian-cpp', 'Blossom'])
+@pytest.mark.parametrize('solver', ['Hungarian', 'Blossom'])
 def test_solvers_easy(solver, shuffle, niter):
     nrow = 50
     ncol = 100
@@ -78,7 +75,7 @@ def test_solvers_easy(solver, shuffle, niter):
         if shuffle:
             cost = shuffle_dataframe(cost)
 
-        pairs = pairwise.gen_assignment_pairs(cost, solver, cppexe)
+        pairs = pairwise.gen_assignment_pairs(cost, solver)
 
         test_sets.append(set([tuple(i) for i in pairs]))
 
@@ -86,7 +83,7 @@ def test_solvers_easy(solver, shuffle, niter):
         assert validation_set == test_set
 
 
-@pytest.mark.parametrize('solver', ['Hungarian', 'Hungarian-cpp', 'Blossom'])
+@pytest.mark.parametrize('solver', ['Hungarian', 'Blossom'])
 def test_real_cost_data(input_file, tmpdir, solver):
     # Hungarian method only stable under permutations at the ~80% level
     # Blossom stable at the > 95% level
@@ -98,22 +95,19 @@ def test_real_cost_data(input_file, tmpdir, solver):
 
     fixed = utils.create_nice_mask(
             j['experiment_containers']['ophys_experiments'][0],
-            output_dir,
-            legacy_label_order=True)
+            output_dir)
     moving = utils.create_nice_mask(
             j['experiment_containers']['ophys_experiments'][1],
-            output_dir,
-            legacy_label_order=True)
+            output_dir)
 
+    # NOTE specifying solver here only matters for code coverage
+    # of input schema, as the cost matrix is used afterwards
+    # to calculate pairs.
     pair_args = {
-            # stability assertions are true even when
-            # using floats and IOUs
-            'integer_centroids': False,
-            'iou_flooring': False,
             'fixed': fixed,
             'moving': moving,
-            'hungarian_executable': cppexe,
             'output_directory': output_dir,
+            'assignment_solver': solver,
             'output_json': os.path.join(
                     output_dir,
                     "{}_to_{}_output.json".format(moving['id'], fixed['id']))
@@ -133,7 +127,7 @@ def test_real_cost_data(input_file, tmpdir, solver):
     for i in range(100):
         cost = shuffle_dataframe(cost)
 
-        pairs = pairwise.gen_assignment_pairs(cost, solver, cppexe)
+        pairs = pairwise.gen_assignment_pairs(cost, solver)
         test_sets.append(set([tuple(i) for i in pairs]))
 
     combos = np.array([
@@ -190,8 +184,7 @@ def test_gen_matching_table():
     assert np.isclose(rejected[0]['distance'], 1.234)
 
 
-@pytest.mark.parametrize('integer_centroids', [True, False])
-def test_region_properties(integer_centroids):
+def test_region_properties():
     mask = np.zeros((3, 100, 100)).astype('uint16')
     mask[0, 40:50, 40:50] = 1
     i1 = np.argwhere(mask[0] == 1)
@@ -204,24 +197,17 @@ def test_region_properties(integer_centroids):
                 }
             }
 
-    prop = pairwise.region_properties(
-            mask, mdict, integer_centroids=integer_centroids)
+    prop = pairwise.region_properties(mask, mdict)
 
     assert prop['centers'].shape == (2, 2)
-    if integer_centroids:
-        ic1 = np.round(i1.mean(axis=0))[::-1]
-        ic2 = np.round(i2.mean(axis=0))[::-1]
-    else:
-        ic1 = i1.mean(axis=0)[::-1]
-        ic2 = i2.mean(axis=0)[::-1]
+    ic1 = i1.mean(axis=0)[::-1]
+    ic2 = i2.mean(axis=0)[::-1]
     assert np.all(np.isclose(
         prop['centers'],
         np.array([ic1, ic2])))
 
 
-@pytest.mark.parametrize('iou_flooring', [True, False])
-@pytest.mark.parametrize('integer_centroids', [True, False])
-def test_calc_distance_iou(iou_flooring, integer_centroids):
+def test_calc_distance_iou():
     mask1 = np.zeros((3, 100, 100)).astype('uint16')
     mask1[0, 40:50, 40:50] = 1
     mask1[1, 60:65, 30:35] = 2
@@ -246,9 +232,7 @@ def test_calc_distance_iou(iou_flooring, integer_centroids):
             mask1,
             mask2,
             dict1,
-            dict2,
-            integer_centroids=integer_centroids,
-            iou_flooring=iou_flooring)
+            dict2)
 
     assert set(distance.columns.tolist()) == set(dict2['mask_dict'].values())
     assert set(distance.index.tolist()) == set(dict1['mask_dict'].values())

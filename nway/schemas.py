@@ -48,20 +48,13 @@ class CommonMatchingSchema(ArgSchema):
         default=1.5e-7,
         description=("Threshold of squared error, below which "
                      "registration is terminated"))
-    hungarian_executable = InputFile(
-        required=False,
-        missing=None,
-        default=None,
-        description=("Executable of Hungarian algorithm for bipartite"
-                     "graph matching."))
     assignment_solver = Str(
         required=False,
         default="Blossom",
         missing="Blossom",
         validator=mm.validate.OneOf([
             "Blossom",
-            "Hungarian",
-            "Hungarian-cpp"]),
+            "Hungarian"]),
         description=("What method to use for solving the assignment problem"
                      " in pairwise matching"))
     motionType = Str(
@@ -79,23 +72,6 @@ class CommonMatchingSchema(ArgSchema):
         missing=5,
         default=5,
         description="passed to opencv findTransformECC")
-    integer_centroids = Boolean(
-        required=False,
-        default=False,
-        missing=False,
-        description="round ROI centroids to integer values")
-    iou_flooring = Boolean(
-        required=False,
-        default=False,
-        missing=False,
-        description="use legacy '//' that sets almost all IOU's to zero")
-    legacy = Boolean(
-        required=False,
-        default=False,
-        missing=False,
-        description=("Establishes 6 settings to reproduce legacy results. "
-                     "3 settings are in pairwise and 3 settings are in nway. "
-                     "NOTE: some of these legacy settings are mistakes. "))
     CLAHE_grid = Int(
         required=False,
         default=8,
@@ -107,30 +83,12 @@ class CommonMatchingSchema(ArgSchema):
         missing=2.5,
         description="clipLimit for cv2 CLAHE")
 
-    @mm.pre_load
-    def set_common_legacy(self, data):
-        if data['legacy']:
-            data['integer_centroids'] = True
-            data['iou_flooring'] = True
-            data['assignment_solver'] = 'Hungarian-cpp'
-            data['CLAHE_grid'] = -1
-            data['motionType'] = 'MOTION_AFFINE'
-
     @mm.post_load
     def hungarian_warn(self, data):
         if "Hungarian" in data['assignment_solver']:
-            logger.warning("Hungarian methid not recommended. It is not "
+            logger.warning("Hungarian method not recommended. It is not "
                            "stable under permutations for typical cell "
                            "matching. Use Blossom.")
-
-    @mm.post_load
-    def check_exe(self, data):
-        if data['assignment_solver'] == 'Hungarian-cpp':
-            if data['hungarian_executable'] is None:
-                raise mm.ValidationError(
-                    "one must supply an executable path to "
-                    "--hungarian_executable when specifying "
-                    " --assignment_solver Hungarian-cpp")
 
 
 class NwayMatchingSchema(CommonMatchingSchema):
@@ -146,24 +104,6 @@ class NwayMatchingSchema(CommonMatchingSchema):
         required=False,
         default=False,
         description=("Whether to save pairwise output jsons"))
-    legacy_label_order = Boolean(
-        required=False,
-        default=False,
-        missing=False,
-        description=("insist on per-layer mask label ordering created by "
-                     "skimage.measure.label. Does not matter, except for "
-                     "legacy Hungarian assignment."))
-    legacy_pruning_order_dependence = Boolean(
-        required=False,
-        default=False,
-        missing=False,
-        description=("use original nway-pruning logic which is "
-                     "order-dependent"))
-    legacy_pruning_index_error = Boolean(
-        required=False,
-        default=False,
-        missing=False,
-        description="preserve index error in nway-pruning")
     pruning_method = Str(
         required=False,
         missing="keepmin",
@@ -173,13 +113,6 @@ class NwayMatchingSchema(CommonMatchingSchema):
                      "    graph neighbors of lowest subgraph score."
                      "'popmax': delete highest scores of subgraphs "
                      "    recursively"))
-
-    @mm.pre_load
-    def set_nway_legacy(self, data):
-        if data['legacy']:
-            data['legacy_label_order'] = True
-            data['legacy_pruning_index_error'] = True
-            data['legacy_pruning_order_dependence'] = True
 
 
 class PairwiseMatchingSchema(CommonMatchingSchema):
