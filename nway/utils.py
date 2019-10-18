@@ -1,6 +1,6 @@
 import numpy as np
 from skimage.transform import AffineTransform
-import PIL
+import PIL.Image
 import os
 import json
 
