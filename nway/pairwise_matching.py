@@ -3,7 +3,7 @@ import logging
 import numpy as np
 import pandas as pd
 import json
-import PIL
+import PIL.Image
 import cv2
 import scipy.spatial
 import scipy.optimize

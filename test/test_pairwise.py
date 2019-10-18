@@ -6,7 +6,7 @@ from jinja2 import Template
 import json
 import itertools
 import cv2
-import PIL
+import PIL.Image
 import nway.utils as utils
 import nway.pairwise_matching as pairwise
 

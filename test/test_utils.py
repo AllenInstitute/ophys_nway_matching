@@ -4,7 +4,7 @@ import numpy as np
 from jinja2 import Template
 import os
 import json
-import PIL
+import PIL.Image
 
 TEST_FILE_DIR = os.path.join(
         os.path.dirname(os.path.abspath(__file__)),
