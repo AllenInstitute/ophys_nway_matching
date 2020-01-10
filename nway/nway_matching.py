@@ -380,6 +380,13 @@ class NwayMatching(ArgSchemaParser):
         self.pair_matches = []
         for fixed, moving in itertools.combinations(self.experiments, 2):
             pair_args = dict(self.args)
+            # marshmallow 3.0.0rc6 is less forgiving about extra keys around
+            # so, pop out the unused shared keys here
+            for popkey in [
+                    "pruning_method",
+                    "experiment_containers",
+                    "save_pairwise_results"]:
+                pair_args.pop(popkey)
             pair_args["fixed"] = fixed
             pair_args["moving"] = moving
             pair_args["output_json"] = os.path.join(
