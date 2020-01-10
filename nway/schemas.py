@@ -89,6 +89,7 @@ class CommonMatchingSchema(ArgSchema):
             logger.warning("Hungarian method not recommended. It is not "
                            "stable under permutations for typical cell "
                            "matching. Use Blossom.")
+        return data
 
 
 class NwayMatchingSchema(CommonMatchingSchema):
