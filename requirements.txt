@@ -1,5 +1,5 @@
 marshmallow==3.0.0rc6
-argschema
+argschema==2.0.0
 numpy
 pillow
 scikit-image
