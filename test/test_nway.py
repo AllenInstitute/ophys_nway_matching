@@ -36,6 +36,7 @@ def input_file(tmpdir):
             template.render(
                 output_dir=output_dir,
                 test_files_dir=str(thistest)))
+    rendered['log_level'] = "DEBUG"
     yield rendered
 
 
