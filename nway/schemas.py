@@ -84,11 +84,12 @@ class CommonMatchingSchema(ArgSchema):
         description="clipLimit for cv2 CLAHE")
 
     @mm.post_load
-    def hungarian_warn(self, data):
+    def hungarian_warn(self, data, **kwargs):
         if "Hungarian" in data['assignment_solver']:
             logger.warning("Hungarian method not recommended. It is not "
                            "stable under permutations for typical cell "
                            "matching. Use Blossom.")
+        return data
 
 
 class NwayMatchingSchema(CommonMatchingSchema):

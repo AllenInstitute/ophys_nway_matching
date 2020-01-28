@@ -110,7 +110,8 @@ def test_real_cost_data(input_file, tmpdir, solver):
             'assignment_solver': solver,
             'output_json': os.path.join(
                     output_dir,
-                    "{}_to_{}_output.json".format(moving['id'], fixed['id']))
+                    "{}_to_{}_output.json".format(moving['id'], fixed['id'])),
+            'log_level': "DEBUG"
             }
 
     pm = pairwise.PairwiseMatching(input_data=pair_args, args=[])

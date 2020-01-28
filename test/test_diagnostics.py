@@ -104,7 +104,9 @@ def test_NwayDiagnostics(new_output, tmpdir):
 
     args = {
             'input_json': new_output,
-            'output_pdf': fname}
+            'output_pdf': fname,
+            'log_level': "DEBUG"
+            }
 
     nd = nwdi.NwayDiagnostics(input_data=args, args=[])
     nd.run()
@@ -119,7 +121,9 @@ def test_NwayDiagnostics(new_output, tmpdir):
     args = {
             'input_json': ninput,
             'output_pdf': "tmp.pdf",
-            'use_input_dir': True}
+            'use_input_dir': True,
+            'log_level': "DEBUG"
+            }
     nd = nwdi.NwayDiagnostics(input_data=args, args=[])
     nd.run()
 
