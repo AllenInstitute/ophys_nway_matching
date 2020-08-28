@@ -15,8 +15,6 @@ def create_nice_mask(experiment, output_directory):
     experiment : dict
         output from segmentation
         'ophys_average_intensity_projection_image' : str(path)
-        'max_int_mask_image' : str(path)
-            (unused, this function creates unique label mask)
         'cell_rois' : dict
         'id' :  str
         'stimulus_name' : str/Null

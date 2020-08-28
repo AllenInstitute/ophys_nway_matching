@@ -17,9 +17,6 @@ class ExperimentSchema(DefaultSchema):
     ophys_average_intensity_projection_image = InputFile(
         required=True,
         description="max projection intensity image")
-    max_int_mask_image = InputFile(
-        required=True,
-        description="mask image")
     cell_rois = List(
         Dict,
         required=True,
