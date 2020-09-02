@@ -71,8 +71,8 @@ class CommonMatchingSchema(ArgSchema):
         description="passed to opencv findTransformECC")
     CLAHE_grid = Int(
         required=False,
-        default=8,
-        missing=8,
+        default=24,
+        missing=24,
         description="tileGridSize for cv2 CLAHE, set to -1 to disable CLAHE")
     CLAHE_clip = Float(
         required=False,
