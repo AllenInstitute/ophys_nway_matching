@@ -439,16 +439,22 @@ def register_image_pair(img_fixed, img_moving, maxCount,
             maxCount,
             epsilon)
 
-    warp_matrix = np.eye(2, 3, dtype=np.float32)
+    # roughly find the translation to help
+    (dx, dy), power = cv2.phaseCorrelate(img_fixed.astype('float32'),
+                                         img_moving.astype('float32'))
+
+    tform = np.array([[1.0, 0.0, dx],
+                      [0.0, 1.0, dy]]).astype('float32')
     if motion_type == 'MOTION_HOMOGRAPHY':
-        warp_matrix = np.eye(3, 3, dtype=np.float32)
+        hrow = np.array([0.0, 0.0, 1.0]).astype('float32')
+        tform = np.vstack((tform, hrow))
 
     try:
         # Run the ECC algorithm. The results are stored in warp_matrix.
         ccval, tform = cv2.findTransformECC(
                 img_fixed,
                 img_moving,
-                warp_matrix,
+                tform,
                 cvmotion[motion_type],
                 criteria,
                 None,
