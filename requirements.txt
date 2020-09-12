@@ -1,8 +1,11 @@
-marshmallow==3.0.0rc6
 argschema==2.0.1
 numpy
 pillow
 scikit-image
 matplotlib
-opencv-python
+opencv-python<5.0
 pandas
+pytest
+pytest-cov
+jinja2
+pypdf2
