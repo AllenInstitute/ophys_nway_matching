@@ -1,0 +1,64 @@
+jobs:
+  build38:
+    executor: 
+      name: python/default
+      tag: "3.8"
+    steps:
+      - checkout
+      - python/load-cache
+      - python/install-deps
+      - python/save-cache
+      - run:
+          command: |
+            python -m pytest --cov nway --cov-report xml
+            bash <(curl -s https://codecov.io/bash) -t ${CODECOV_TOKEN}
+          name: Test
+
+  lint:
+    executor: python/default
+    steps:
+      - checkout
+      - run:
+          command: |
+            pip install flake8
+            # `|| true` to force exit code 0 even if no files found
+            CHANGED_PYFILES=$(git diff --name-only --diff-filter AM origin/master | grep .py || true)
+            echo "List of changed files:"
+            echo ${CHANGED_PYFILES}
+            echo ${CHANGED_PYFILES} | xargs -r flake8 --count
+          name: Lint
+
+  docker:
+    machine: true
+    steps:
+      - checkout
+      - run: echo "$DOCKER_PASS" | docker login --username $DOCKER_USER --password-stdin
+      - run: 
+          name: Build and Push docker image
+          command: |
+            if [ "$CIRCLE_BRANCH" = "master" ]
+            then
+                MYTAG=master
+            else
+                MYTAG=develop
+            fi
+            # source/target tagging to alleviate concerns about unintended caching
+            image_source=alleninstitutepika/ophys_nway_matching:${CIRCLE_SHA1}
+            image_target=alleninstitutepika/ophys_nway_matching:${MYTAG}
+            docker build --build-arg MYBRANCH=${CIRCLE_BRANCH} -t ${image_source} .
+            docker run --entrypoint /bin/bash ${image_source} -c "python -m pytest"
+            docker tag ${image_source} ${image_target}
+            docker push ${image_target}
+
+orbs:
+  python: circleci/python@0.3.2
+version: 2.1
+workflows:
+  main:
+    jobs:
+      - build38
+      - lint
+      - docker:
+          requires:
+            - build38
+            - lint
