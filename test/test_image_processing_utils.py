@@ -9,7 +9,7 @@ TEST_FILE_DIR = Path.resolve(Path(__file__)).parent / "test_files"
 
 
 @pytest.fixture
-def fixed_image():
+def fixed_image_fixture():
     # grab one specific file because failing large translation
     # cases vary image-by-image
     fgen = TEST_FILE_DIR.rglob("avgInt_a1X.png")
@@ -22,17 +22,17 @@ def fixed_image():
 
 
 @pytest.fixture
-def noisy_image(fixed_image):
-    flatim = np.flipud(np.fliplr(fixed_image))
-    return flatim
+def flipped_image_fixture(fixed_image_fixture):
+    flipped = np.flipud(np.fliplr(fixed_image_fixture))
+    return flipped
 
 
 @pytest.fixture
-def moving_image_fixture(fixed_image, request):
+def moving_image_fixture(fixed_image_fixture, request):
     immoving = cv2.warpPerspective(
-            fixed_image,
+            fixed_image_fixture,
             request.param.get("transform"),
-            fixed_image.shape[::-1])
+            fixed_image_fixture.shape[::-1])
     return immoving, request.param
 
 
@@ -64,8 +64,8 @@ def moving_image_fixture(fixed_image, request):
                                    [0.0, 0.0, 1.0]])},
            ],
         indirect=["moving_image_fixture"])
-def test_register_image_pair(fixed_image, moving_image_fixture, preregister,
-                             motion_type, tform_tol, trans_tol):
+def test_register_image_pair(fixed_image_fixture, moving_image_fixture,
+                             preregister, motion_type, tform_tol, trans_tol):
     """
     warp an image and see if the register image can recover the transform.
     NOTE: in production, we are using MOTION_EUCLIDEAN as that is the
@@ -82,7 +82,7 @@ def test_register_image_pair(fixed_image, moving_image_fixture, preregister,
     moving_image, param = moving_image_fixture
     expected_transform = param["transform"]
     transform = imu.register_image_pair(
-            fixed_image,
+            fixed_image_fixture,
             moving_image,
             500,
             1e-3,
@@ -126,8 +126,9 @@ def test_register_image_pair(fixed_image, moving_image_fixture, preregister,
                                     [0.0, 0.0, 1.0]])}, False),
             ],
         indirect=["moving_image_fixture"])
-def test_preregister_for_big_translations(fixed_image, moving_image_fixture,
-                                          preregister, motion_type, tform_tol,
+def test_preregister_for_big_translations(fixed_image_fixture,
+                                          moving_image_fixture, preregister,
+                                          motion_type, tform_tol,
                                           trans_tol, expect_success):
     """ the preregistration fixes cases that fail for large offsets. These
     are examples of those cases.
@@ -135,7 +136,7 @@ def test_preregister_for_big_translations(fixed_image, moving_image_fixture,
     moving_image, param = moving_image_fixture
     expected_transform = param["transform"]
     transform = imu.register_image_pair(
-            fixed_image,
+            fixed_image_fixture,
             moving_image,
             500,
             1e-3,
@@ -157,14 +158,14 @@ def test_preregister_for_big_translations(fixed_image, moving_image_fixture,
                                atol=trans_tol[0], rtol=trans_tol[1])
 
 
-def test_failure_to_align(fixed_image, noisy_image):
+def test_failure_to_align(fixed_image_fixture, flipped_image_fixture):
     with pytest.raises(
             cv2.error,
             match=(".*Images may be uncorrelated or non-overlapped "
                    "in function 'findTransformECC")):
         imu.register_image_pair(
-                fixed_image,
-                noisy_image,
+                fixed_image_fixture,
+                flipped_image_fixture,
                 50,
                 1e-7,
                 'MOTION_EUCLIDEAN',
@@ -174,20 +175,20 @@ def test_failure_to_align(fixed_image, noisy_image):
 
 @pytest.mark.parametrize("CLAHE_GRID, CLAHE_CLIP",
                          [(8, 2.5), (24, 2.5), (-1, 2.5)])
-def test_contrast_adjust(fixed_image, CLAHE_GRID, CLAHE_CLIP):
-    ca_image = imu.contrast_adjust(fixed_image, CLAHE_GRID, CLAHE_CLIP)
-    assert ca_image.shape == fixed_image.shape
-    assert ca_image.dtype == fixed_image.dtype
+def test_contrast_adjust(fixed_image_fixture, CLAHE_GRID, CLAHE_CLIP):
+    ca_image = imu.contrast_adjust(fixed_image_fixture, CLAHE_GRID, CLAHE_CLIP)
+    assert ca_image.shape == fixed_image_fixture.shape
+    assert ca_image.dtype == fixed_image_fixture.dtype
 
 
 @pytest.mark.parametrize("motion_type", [
                          "MOTION_TRANSLATION", "MOTION_EUCLIDEAN",
                          "MOTION_AFFINE", "MOTION_HOMOGRAPHY"])
-def test_warp_image(fixed_image, motion_type):
+def test_warp_image(fixed_image_fixture, motion_type):
     tform = np.array([[1.1, 0.1, 12.3],
                       [-0.5, 0.94, -23],
                       [0.0, 0.0, 1.0]])
     warped = imu.warp_image(
-            fixed_image, tform, motion_type, fixed_image.shape)
-    assert warped.shape == fixed_image.shape
+            fixed_image_fixture, tform, motion_type, fixed_image_fixture.shape)
+    assert warped.shape == fixed_image_fixture.shape
     assert warped.dtype == 'uint8'
