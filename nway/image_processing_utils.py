@@ -52,8 +52,8 @@ def register_image_pair(img_fixed: np.ndarray, img_moving: np.ndarray,
 
     dx = dy = 0.0
     if preregister:
-        (dx, dy), _ = cv2.phaseCorrelate(img_fixed.astype('float32'),
-                                         img_moving.astype('float32'))
+        (dx, dy), _ = cv2.phaseCorrelate(src1=img_fixed.astype('float32'),
+                                         src2=img_moving.astype('float32'))
 
     tform = np.array([[1.0, 0.0, dx],
                       [0.0, 1.0, dy]]).astype('float32')
@@ -62,15 +62,15 @@ def register_image_pair(img_fixed: np.ndarray, img_moving: np.ndarray,
         tform = np.vstack((tform, hrow))
 
     try:
-        # Run the ECC algorithm. The results are stored in warp_matrix.
+        # Run the ECC algorithm. The results are stored in tform
         ccval, tform = cv2.findTransformECC(
-                img_fixed,
-                img_moving,
-                tform,
-                cvmotion[motion_type],
-                criteria,
-                None,
-                gaussFiltSize)
+                templateImage=img_fixed,
+                inputImage=img_moving,
+                warpMatrix=tform,
+                motionType=cvmotion[motion_type],
+                criteria=criteria,
+                inputMask=None,
+                gaussFiltSize=gaussFiltSize)
     except cv2.error:
         logger.error("failed to align images.")
         raise
@@ -104,7 +104,7 @@ def contrast_adjust(image, CLAHE_grid, CLAHE_clip):
         clahe = cv2.createCLAHE(
             clipLimit=CLAHE_clip,
             tileGridSize=(CLAHE_grid, CLAHE_grid))
-        image = clahe.apply(image)
+        image = clahe.apply(src=image)
     return image
 
 
@@ -137,9 +137,9 @@ def warp_image(image, tform, motion_type, dst_shape):
             tform = tform[0:2]
 
     image = warp(
-            image,
-            tform,
-            dst_shape[::-1],
+            src=image,
+            M=tform,
+            dsize=dst_shape[::-1],
             flags=cv2.INTER_LINEAR + cv2.WARP_INVERSE_MAP).astype(np.uint8)
 
     return image
