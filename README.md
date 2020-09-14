@@ -1,7 +1,22 @@
+[![CircleCI](https://circleci.com/gh/AllenInstitute/ophys_nway_matching.svg?style=svg)](https://circleci.com/gh/AllenInstitute/ophys_nway_matching)
 [![codecov](https://codecov.io/gh/AllenInstitute/ophys_nway_matching/branch/master/graph/badge.svg?token=y5Nt5RnMwB)](https://codecov.io/gh/AllenInstitute/ophys_nway_matching)
 
 # ophys_nway_matching
 N-way matching of segmented cell ROIs
+
+# Docker and Singularity
+A docker image is built in CircleCI and pushed to [dockerhub](https://hub.docker.com/repository/docker/alleninstitutepika/ophys_nway_matching) tagged as either `master` or `develop`.
+
+Singularity should be able to run this docker image directly:
+```
+singularity run docker://alleninstitutepika/ophys_nway_matching:develop python -m pytest /ophys_nway_matching
+```
+or
+```
+singularity run docker://alleninstitutepika/ophys_nway_matching:develop python -m nway.nway_matching --help
+```
+
+It appears the calling singularity in this way intelligently uses the local caches for both docker and singularity. There is an overhead for downloading an updated docker image and translating it to a singularity image. That cost is incurred only when the docker image has changed.
 
 # quick start
 
