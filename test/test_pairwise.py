@@ -265,7 +265,9 @@ def test_calculate_cost_matrix():
 
 @pytest.mark.parametrize('CLAHE_grid', [-1, 8])
 @pytest.mark.parametrize('motion', ['MOTION_AFFINE', 'MOTION_HOMOGRAPHY'])
-def test_register(input_file, tmpdir, motion, CLAHE_grid):
+def test_register_legacy(input_file, tmpdir, motion, CLAHE_grid):
+    """these tests pass with preregister=False
+    """
     CLAHE_clip = 2.5
     with open(input_file, 'r') as f:
         j = json.load(f)
@@ -302,7 +304,8 @@ def test_register(input_file, tmpdir, motion, CLAHE_grid):
             motion,
             5,
             CLAHE_grid,
-            CLAHE_clip)
+            CLAHE_clip,
+            preregister=False)
 
     # is the affine transform pretty close to what we put in?
     assert np.all(np.isclose(tform[0:2, 0:2], new_tform[0:2, 0:2], atol=0.005))
@@ -324,4 +327,5 @@ def test_register(input_file, tmpdir, motion, CLAHE_grid):
                     motion,
                     5,
                     CLAHE_grid,
-                    CLAHE_clip)
+                    CLAHE_clip,
+                    preregister=False)

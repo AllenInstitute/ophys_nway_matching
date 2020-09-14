@@ -13,6 +13,7 @@ from argschema import ArgSchemaParser
 
 from nway.schemas import PairwiseMatchingSchema, PairwiseOutputSchema
 import nway.utils as utils
+import nway.image_processing_utils as imutils
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -401,7 +402,8 @@ def transform_mask(moving, dst_shape, tform):
 
 def register_intensity_images(
         img_path_fixed, img_path_moving, maxCount,
-        epsilon, motion_type, gaussFiltSize, CLAHE_grid, CLAHE_clip):
+        epsilon, motion_type, gaussFiltSize, CLAHE_grid, CLAHE_clip,
+        preregister=True):
     """find the transform that registers two images
 
     Parameters
@@ -422,6 +424,8 @@ def register_intensity_images(
         passed as tileGridSize to cv2.createCLAHE
     CLAHE_clip : int
         passed as clipLimit to cv2.createCLAHE
+    preregister: bool
+        whether to give a hint to cv2.findTransformECC from cv2.phaseCorrelate
 
     Returns
     -------
@@ -433,65 +437,27 @@ def register_intensity_images(
 
     """
 
-    cvmotion = {
-            "MOTION_TRANSLATION": cv2.MOTION_TRANSLATION,
-            "MOTION_EUCLIDEAN": cv2.MOTION_EUCLIDEAN,
-            "MOTION_AFFINE": cv2.MOTION_AFFINE,
-            "MOTION_HOMOGRAPHY": cv2.MOTION_HOMOGRAPHY}
-
     # read average intensity images
     with PIL.Image.open(img_path_fixed) as im:
         img_fixed = np.array(im)
     with PIL.Image.open(img_path_moving) as im:
         img_moving = np.array(im)
 
-    if CLAHE_grid != -1:
-        clahe = cv2.createCLAHE(
-            clipLimit=CLAHE_clip,
-            tileGridSize=(CLAHE_grid, CLAHE_grid))
-        img_fixed = clahe.apply(img_fixed)
-        img_moving = clahe.apply(img_moving)
+    # perform contrast adjustment
+    img_fixed = imutils.contrast_adjust(img_fixed, CLAHE_grid, CLAHE_clip)
+    img_moving = imutils.contrast_adjust(img_moving, CLAHE_grid, CLAHE_clip)
 
-    # Define termination criteria
-    criteria = (
-            cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT,
-            maxCount,
-            epsilon)
+    # find the transform
+    tform = imutils.register_image_pair(img_fixed, img_moving, maxCount,
+                                        epsilon, motion_type, gaussFiltSize,
+                                        preregister)
 
-    warp_matrix = np.eye(2, 3, dtype=np.float32)
-    if motion_type == 'MOTION_HOMOGRAPHY':
-        warp_matrix = np.eye(3, 3, dtype=np.float32)
-
-    try:
-        # Run the ECC algorithm. The results are stored in warp_matrix.
-        ccval, tform = cv2.findTransformECC(
-                img_fixed,
-                img_moving,
-                warp_matrix,
-                cvmotion[motion_type],
-                criteria,
-                None,
-                gaussFiltSize)
-    except cv2.error:
-        logger.error("failed to align images {} and {}".format(
-            img_path_fixed,
-            img_path_moving))
-        raise
-
-    if motion_type == 'MOTION_HOMOGRAPHY':
-        warp = cv2.warpPerspective
-    else:
-        warp = cv2.warpAffine
-
-    img_moving_warped = warp(
+    # warp the moving image
+    img_moving_warped = imutils.warp_image(
             img_moving,
             tform,
-            img_fixed.shape[::-1],
-            flags=cv2.INTER_LINEAR + cv2.WARP_INVERSE_MAP).astype(np.uint8)
-
-    # if affine only, output full 3x3
-    if tform.shape == (2, 3):
-        tform = np.vstack((tform, [0, 0, 1]))
+            motion_type,
+            img_fixed.shape)
 
     return tform, img_moving_warped
 
@@ -524,7 +490,8 @@ class PairwiseMatching(ArgSchemaParser):
                 self.args['motionType'],
                 self.args['gaussFiltSize'],
                 self.args['CLAHE_grid'],
-                self.args['CLAHE_clip'])
+                self.args['CLAHE_clip'],
+                preregister=self.args['preregister'])
 
         if self.args['save_registered_image']:
             imfname = os.path.join(
