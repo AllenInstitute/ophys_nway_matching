@@ -3,6 +3,7 @@ from skimage.transform import AffineTransform
 import PIL.Image
 import os
 import json
+from typing import List, Any, Tuple
 
 
 def create_nice_mask(experiment, output_directory):
@@ -91,6 +92,53 @@ def row_col_from_roi(roi):
     return masked
 
 
+def layered_mask_from_rois(rois: List[Any],
+                           shape: Tuple[int, int]) -> np.ndarray:
+    """makes a (nz, *shape) dimensioned array where each layer ("z")
+    has no overlapping ROIs
+
+    Parameters
+    ----------
+    rois: list
+        list of ROIs. The list is the same as "cell_rois" in
+        ExperimentSchema
+    shape: tuple
+        (nrows, ncols) of the destination image
+
+    Returns
+    -------
+    masks: numpy.ndarray
+       dimensions (nz, nrows, ncols)
+
+    """
+    def new_layer():
+        return np.zeros(shape, dtype=np.uint32)
+
+    masks = [new_layer()]
+    for roi in rois:
+        tmp = new_layer()
+        tmp[roi['y']:(roi['y'] + roi['height']),
+            roi['x']:(roi['x'] + roi['width'])] = np.uint32(roi['mask_matrix'])
+        tmp *= roi['id']
+        bool_tmp = tmp != 0
+        placed = False
+        for imask in range(len(masks)):
+            bool_mask = masks[imask] != 0
+            if np.any(bool_tmp & bool_mask):
+                # some overlap, move to next layer
+                pass
+            else:
+                # no overlap, add to this layer
+                masks[imask] += tmp
+                placed = True
+                break
+        if not placed:
+            masks.append(tmp)
+    masks = np.array(masks)
+
+    return masks
+
+
 def labeled_mask_from_experiment(exp):
     """create a labeled mask and to-cell-id dictionary
     from the experiment json
@@ -109,7 +157,6 @@ def labeled_mask_from_experiment(exp):
             height: row height
             mask_matrix: nested boolean list h x w
             id : unique cell id, uint32 from LIMS
-            z : depth of roi. depths keep overlapping rois distinct
 
     Returns
     -------
@@ -122,13 +169,10 @@ def labeled_mask_from_experiment(exp):
     with PIL.Image.open(
             exp['ophys_average_intensity_projection_image']) as fim:
         im = np.array(fim)
-    imsz = im.shape
-    zs = np.unique([r['z'] for r in exp['cell_rois']])
-    mask = np.zeros((zs.size, imsz[0], imsz[1])).astype('uint32')
-    for roi in exp['cell_rois']:
-        rc = row_col_from_roi(roi)
-        mask[roi['z'], rc[:, 0], rc[:, 1]] = roi['id']
+    # layered mask with uint32 ids as intensities
+    mask = layered_mask_from_rois(exp['cell_rois'], im.shape)
 
+    # relabel as ordered uint16 and a translating map
     x = np.unique(mask)
     relabeled = np.zeros_like(mask).astype('uint16')
     rdict = {}

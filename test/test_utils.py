@@ -103,3 +103,121 @@ def test_read_tiff_3d(depth, tmpdir):
 
     assert new_mask.shape == mask.shape
     assert np.all(new_mask == mask)
+
+
+@pytest.mark.parametrize(
+        "rois, shape, expected",
+        [
+            (  # 2 overlapping ROIS
+                [
+                    {
+                        'id': 1,
+                        'x': 2,
+                        'y': 2,
+                        'width': 2,
+                        'height': 2,
+                        'mask_matrix': [[True, True],
+                                        [True, True]]
+                        },
+                    {
+                        'id': 2,
+                        'x': 3,
+                        'y': 3,
+                        'width': 2,
+                        'height': 2,
+                        'mask_matrix': [[True, True],
+                                        [True, True]]
+                        }],
+                (5, 5),
+                np.array([
+                    [[0, 0, 0, 0, 0],
+                     [0, 0, 0, 0, 0],
+                     [0, 0, 1, 1, 0],
+                     [0, 0, 1, 1, 0],
+                     [0, 0, 0, 0, 0]],
+                    [[0, 0, 0, 0, 0],
+                     [0, 0, 0, 0, 0],
+                     [0, 0, 0, 0, 0],
+                     [0, 0, 0, 2, 2],
+                     [0, 0, 0, 2, 2]]]).astype('uint32')),
+            (  # 2 non-overlapping ROIs
+                [
+                    {
+                        'id': 1,
+                        'x': 1,
+                        'y': 1,
+                        'width': 2,
+                        'height': 2,
+                        'mask_matrix': [[True, True],
+                                        [True, True]]
+                        },
+                    {
+                        'id': 2,
+                        'x': 3,
+                        'y': 3,
+                        'width': 2,
+                        'height': 2,
+                        'mask_matrix': [[True, True],
+                                        [True, True]]
+                        }],
+                (5, 5),
+                np.array([
+                    [[0, 0, 0, 0, 0],
+                     [0, 1, 1, 0, 0],
+                     [0, 1, 1, 0, 0],
+                     [0, 0, 0, 2, 2],
+                     [0, 0, 0, 2, 2]]]).astype('uint32')),
+            (  # 3 ROIs destined for 2 layers, out of order
+                [
+                    {
+                        'id': 1,
+                        'x': 1,
+                        'y': 1,
+                        'width': 2,
+                        'height': 2,
+                        'mask_matrix': [[True, True],
+                                        [True, True]]
+                        },
+                    {
+                        'id': 2,
+                        'x': 2,
+                        'y': 2,
+                        'width': 2,
+                        'height': 2,
+                        'mask_matrix': [[True, True],
+                                        [True, True]]
+                        },
+                    {
+                        'id': 3,
+                        'x': 3,
+                        'y': 3,
+                        'width': 2,
+                        'height': 2,
+                        'mask_matrix': [[True, True],
+                                        [True, True]]
+                        }],
+                (5, 5),
+                np.array([
+                    [[0, 0, 0, 0, 0],
+                     [0, 1, 1, 0, 0],
+                     [0, 1, 1, 0, 0],
+                     [0, 0, 0, 3, 3],
+                     [0, 0, 0, 3, 3]],
+                    [[0, 0, 0, 0, 0],
+                     [0, 0, 0, 0, 0],
+                     [0, 0, 2, 2, 0],
+                     [0, 0, 2, 2, 0],
+                     [0, 0, 0, 0, 0]]]).astype('uint32')),
+            (  # no ROIs
+                [],
+                (5, 5),
+                np.array([
+                    [[0, 0, 0, 0, 0],
+                     [0, 0, 0, 0, 0],
+                     [0, 0, 0, 0, 0],
+                     [0, 0, 0, 0, 0],
+                     [0, 0, 0, 0, 0]]]).astype('uint32')),
+                    ])
+def test_layered_mask_from_rois(rois, shape, expected):
+    masks = utils.layered_mask_from_rois(rois, shape)
+    np.testing.assert_array_equal(masks, expected)
