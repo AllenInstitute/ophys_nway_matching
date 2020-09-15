@@ -1,15 +1,3 @@
-# -*- coding: utf-8 -*-
-'''
-Main function of nway matching of cells
-
-Copyright (c) Allen Institute for Brain Science
-
-Usage:
---input_json <input json path>
---output_json <output json path>
---munkres_executable <munkres executable>
-'''
-
 import logging
 import numpy as np
 import os
