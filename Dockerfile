@@ -1,7 +1,7 @@
 FROM python:3.8.5
 
 ARG MYBRANCH=master
-ARG COMMIT=""
+ARG COMMIT="unspecified to docker build"
 
 RUN apt-get update && \
     apt-get install -y \
