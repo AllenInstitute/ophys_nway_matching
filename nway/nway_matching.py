@@ -373,6 +373,9 @@ class NwayMatching(ArgSchemaParser):
         """Nway cell matching by calling pairwise
            matching and then combining the results
         """
+        # log this ENV variable, if present
+        commit = os.environ.get("NWAY_COMMIT_SHA", None)
+        logger.info(f"NWAY_COMMIT_SHA {commit}")
 
         self.make_masks_from_dicts()
 

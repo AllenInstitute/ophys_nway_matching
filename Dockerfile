@@ -1,6 +1,7 @@
 FROM python:3.8.5
 
 ARG MYBRANCH=master
+ARG COMMIT=""
 
 RUN apt-get update && \
     apt-get install -y \
@@ -15,3 +16,5 @@ RUN cd ophys_nway_matching && \
     pip install .
 
 WORKDIR /ophys_nway_matching
+
+ENV NWAY_COMMIT_SHA=${COMMIT}
