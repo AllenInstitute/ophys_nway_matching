@@ -45,7 +45,10 @@ jobs:
             # source/target tagging to alleviate concerns about unintended caching
             image_source=alleninstitutepika/ophys_nway_matching:${CIRCLE_SHA1}
             image_target=alleninstitutepika/ophys_nway_matching:${MYTAG}
-            docker build --build-arg MYBRANCH=${CIRCLE_BRANCH} -t ${image_source} .
+            docker build \
+                --build-arg MYBRANCH=${CIRCLE_BRANCH} \
+                --build-arg COMMIT=${CIRCLE_SHA1} \
+                -t ${image_source} .
             docker run --entrypoint /bin/bash ${image_source} -c "python -m pytest"
             docker tag ${image_source} ${image_target}
             docker push ${image_target}

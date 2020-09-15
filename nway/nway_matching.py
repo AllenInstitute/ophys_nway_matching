@@ -8,6 +8,7 @@ import networkx as nx
 from nway.pairwise_matching import PairwiseMatching
 from nway.schemas import NwayMatchingSchema, NwayMatchingOutputSchema
 import nway.utils as utils
+from nway import __version__ as nway_version
 from argschema import ArgSchemaParser
 
 logger = logging.getLogger(__name__)
@@ -361,6 +362,10 @@ class NwayMatching(ArgSchemaParser):
         """Nway cell matching by calling pairwise
            matching and then combining the results
         """
+        # log this ENV variable, if present
+        commit = os.environ.get("NWAY_COMMIT_SHA", None)
+        logger.info(f"NWAY_COMMIT_SHA {commit}")
+        logger.info(f"Nway matching version {nway_version}")
 
         self.make_masks_from_dicts()
 
