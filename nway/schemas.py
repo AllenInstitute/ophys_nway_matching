@@ -20,6 +20,7 @@ class ExperimentSchema(DefaultSchema):
     cell_rois = List(
         Dict,
         required=True,
+        cli_as_single_argument=True,
         description='dict mapping of ids, labels, zs,')
     nice_mask_path = InputFile(
         required=True,
