@@ -403,7 +403,7 @@ def transform_mask(moving, dst_shape, tform):
 def register_intensity_images(
         img_path_fixed, img_path_moving, maxCount,
         epsilon, motion_type, gaussFiltSize, CLAHE_grid, CLAHE_clip,
-        preregister=True):
+        mask_buffer, preregister=True):
     """find the transform that registers two images
 
     Parameters
@@ -424,6 +424,10 @@ def register_intensity_images(
         passed as tileGridSize to cv2.createCLAHE
     CLAHE_clip : int
         passed as clipLimit to cv2.createCLAHE
+    mask_buffer: int
+        number of pixels to exclude on edges for cv2.findTransformECC. This
+        can help eliminate undesired registrations to motion correction
+        border artifacts
     preregister: bool
         whether to give a hint to cv2.findTransformECC from cv2.phaseCorrelate
 
@@ -450,7 +454,7 @@ def register_intensity_images(
     # find the transform
     tform = imutils.register_image_pair(img_fixed, img_moving, maxCount,
                                         epsilon, motion_type, gaussFiltSize,
-                                        preregister)
+                                        mask_buffer, preregister)
 
     # warp the moving image
     img_moving_warped = imutils.warp_image(
@@ -491,6 +495,7 @@ class PairwiseMatching(ArgSchemaParser):
                 self.args['gaussFiltSize'],
                 self.args['CLAHE_grid'],
                 self.args['CLAHE_clip'],
+                self.args['mask_buffer'],
                 preregister=self.args['preregister'])
 
         if self.args['save_registered_image']:

@@ -80,6 +80,15 @@ class CommonMatchingSchema(ArgSchema):
         default=2.5,
         missing=2.5,
         description="clipLimit for cv2 CLAHE")
+    mask_buffer = Int(
+        required=False,
+        default=40,
+        missing=40,
+        description=("for the InputMask for cv2.findTransformECC. This "
+                     "parameter ignores rows and columns of the image within "
+                     "this buffer size of the edges. 0 = no masking. Helps "
+                     "eliminate unwanted alignments to motion correction "
+                     "artifacts on edges."))
     preregister = Bool(
         required=False,
         default=True,

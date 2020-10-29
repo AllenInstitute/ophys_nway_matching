@@ -108,6 +108,7 @@ def test_real_cost_data(input_file, tmpdir, solver):
             'moving': moving,
             'output_directory': output_dir,
             'assignment_solver': solver,
+            'mask_buffer': 0,
             'output_json': os.path.join(
                     output_dir,
                     "{}_to_{}_output.json".format(moving['id'], fixed['id'])),
@@ -305,6 +306,7 @@ def test_register_legacy(input_file, tmpdir, motion, CLAHE_grid):
             5,
             CLAHE_grid,
             CLAHE_clip,
+            0,
             preregister=False)
 
     # is the affine transform pretty close to what we put in?
@@ -328,4 +330,5 @@ def test_register_legacy(input_file, tmpdir, motion, CLAHE_grid):
                     5,
                     CLAHE_grid,
                     CLAHE_clip,
+                    0,
                     preregister=False)

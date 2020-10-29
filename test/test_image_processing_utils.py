@@ -88,6 +88,7 @@ def test_register_image_pair(fixed_image_fixture, moving_image_fixture,
             1e-3,
             motion_type,
             5,
+            0,
             preregister)
 
     if not np.allclose(expected_transform[0:2, 0:2], np.eye(2)) & \
@@ -142,6 +143,7 @@ def test_preregister_for_big_translations(fixed_image_fixture,
             1e-3,
             motion_type,
             5,
+            0,
             preregister)
 
     if preregister & expect_success:
@@ -192,3 +194,30 @@ def test_warp_image(fixed_image_fixture, motion_type):
             fixed_image_fixture, tform, motion_type, fixed_image_fixture.shape)
     assert warped.shape == fixed_image_fixture.shape
     assert warped.dtype == 'uint8'
+
+
+@pytest.mark.parametrize(
+        "mask_buffer, shape, expected",
+        [
+            (0, (4, 5), np.uint8([[1, 1, 1, 1, 1],
+                                  [1, 1, 1, 1, 1],
+                                  [1, 1, 1, 1, 1],
+                                  [1, 1, 1, 1, 1]])),
+            (1, (4, 5), np.uint8([[0, 0, 0, 0, 0],
+                                  [0, 1, 1, 1, 0],
+                                  [0, 1, 1, 1, 0],
+                                  [0, 0, 0, 0, 0]])),
+            (2, (5, 5), np.uint8([[0, 0, 0, 0, 0],
+                                  [0, 0, 0, 0, 0],
+                                  [0, 0, 1, 0, 0],
+                                  [0, 0, 0, 0, 0],
+                                  [0, 0, 0, 0, 0]])),
+            ])
+def test_make_registration_mask(mask_buffer, shape, expected):
+    mask = imu.make_registration_mask(mask_buffer, shape)
+    np.testing.assert_array_equal(mask, expected)
+
+
+def test_make_registration_mask_error():
+    with pytest.raises(ValueError, match=r".*exceeds image dimension.*"):
+        imu.make_registration_mask(10, (5, 5))

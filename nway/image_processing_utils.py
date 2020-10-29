@@ -1,14 +1,44 @@
 import cv2
 import numpy as np
 import logging
+from typing import Tuple
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
 
+def make_registration_mask(mask_buffer: int, shape: Tuple) -> np.ndarray:
+    """makes a mask with buffered edges zero and center 1
+
+    Parameters
+    ----------
+    mask_buffer: int
+        the first and last mask_buffer rows and columns will be zero
+    shape: tuple
+        the shape of the mask
+
+    Returns
+    -------
+    mask: numpy.ndarray
+        a numpy uint8 array of 1 specified shape with rows and columns
+        within mask_buffer of the edges set to 0
+
+    """
+    if np.any(mask_buffer > np.array(shape)):
+        raise ValueError(f"mask buffer {mask_buffer} exceeds image dimension "
+                         f"{shape}")
+    mask = np.zeros(shape).astype('uint8')
+    if mask_buffer == 0:
+        mask += 1
+    else:
+        mask[mask_buffer:-mask_buffer, mask_buffer:-mask_buffer] = 1
+    return mask
+
+
 def register_image_pair(img_fixed: np.ndarray, img_moving: np.ndarray,
                         maxCount: int, epsilon: float,
                         motion_type: str, gaussFiltSize: int,
+                        mask_buffer: int,
                         preregister: bool = True) -> np.ndarray:
     """find the transform that registers two images
 
@@ -28,6 +58,10 @@ def register_image_pair(img_fixed: np.ndarray, img_moving: np.ndarray,
     gaussFiltSize : int
         passed to opencv findTransformECC(). An optional value
         indicating size of gaussian blur filter
+    mask_buffer: int
+        number of pixels to exclude on edges for cv2.findTransformECC. This
+        can help eliminate undesired registrations to motion correction
+        border artifacts
     preregister: bool
         whether to give a hint to cv2.findTransformECC from cv2.phaseCorrelate
 
@@ -61,6 +95,9 @@ def register_image_pair(img_fixed: np.ndarray, img_moving: np.ndarray,
         hrow = np.array([0.0, 0.0, 1.0]).astype('float32')
         tform = np.vstack((tform, hrow))
 
+    # specify a mask to ECC
+    mask = make_registration_mask(mask_buffer, img_moving.shape)
+
     try:
         # Run the ECC algorithm. The results are stored in tform
         ccval, tform = cv2.findTransformECC(
@@ -69,7 +106,7 @@ def register_image_pair(img_fixed: np.ndarray, img_moving: np.ndarray,
                 warpMatrix=tform,
                 motionType=cvmotion[motion_type],
                 criteria=criteria,
-                inputMask=None,
+                inputMask=mask,
                 gaussFiltSize=gaussFiltSize)
     except cv2.error:
         logger.error("failed to align images.")
