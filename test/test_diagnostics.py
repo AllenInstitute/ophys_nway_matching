@@ -1,13 +1,13 @@
 import pytest
 import matplotlib
-matplotlib.use('Agg')
-import matplotlib.pyplot as plt
-import matplotlib.gridspec as gridspec
-import nway.diagnostics as nwdi
 import os
 import PyPDF2
 import shutil
 import json
+import nway.diagnostics as nwdi
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt  # noqa: E402
+import matplotlib.gridspec as gridspec  # noqa: E402
 
 TEST_FILE_DIR = os.path.join(
         os.path.dirname(os.path.abspath(__file__)),
@@ -117,10 +117,14 @@ def test_NwayDiagnostics(new_output, tmpdir):
             output_dir,
             "tmpinput.json")
 
+    fname3 = os.path.join(
+            output_dir,
+            "output3.pdf")
+
     shutil.copy(new_output, ninput)
     args = {
             'input_json': ninput,
-            'output_pdf': "tmp.pdf",
+            'output_pdf': fname3,
             'use_input_dir': True,
             'log_level': "DEBUG"
             }
