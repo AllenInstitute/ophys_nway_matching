@@ -49,7 +49,7 @@ jobs:
                 --build-arg MYBRANCH=${CIRCLE_BRANCH} \
                 --build-arg COMMIT=${CIRCLE_SHA1} \
                 -t ${image_source} .
-            docker run --entrypoint /bin/bash ${image_source} -c "python -m pytest"
+            docker run --entrypoint /bin/bash --read-only --tmpfs /tmp ${image_source} -c "python -m pytest"
             docker tag ${image_source} ${image_target}
             docker push ${image_target}
 
