@@ -11,8 +11,13 @@ import itertools
 from argschema import ArgSchemaParser
 
 from nway.schemas import PairwiseMatchingSchema, PairwiseOutputSchema
+from nway.meta_registration import MetaRegistration
 import nway.utils as utils
 import nway.image_processing_utils as imutils
+
+
+class PairwiseException(Exception):
+    pass
 
 
 def gen_assignment_pairs(cost_matrix, solver):
@@ -396,68 +401,6 @@ def transform_mask(moving, dst_shape, tform):
     return transformed_3d
 
 
-def register_intensity_images(
-        img_path_fixed, img_path_moving, maxCount,
-        epsilon, motion_type, gaussFiltSize, CLAHE_grid, CLAHE_clip,
-        preregister=True):
-    """find the transform that registers two images
-
-    Parameters
-    ----------
-    img_path_fixed : str
-        path to fixed image
-    img_path_moving : str
-        path to moving image
-    maxCount : int
-        passed as maxCount to opencv termination criteria
-    epsilon : float
-        passed as epsilon to opencv termination criteria
-    motion_type : str
-        one of the 4 possible motion types for opencv findTransformECC
-    gaussFiltSize : int
-        passed to opencv findTransformECC()
-    CLAHE_grid : int
-        passed as tileGridSize to cv2.createCLAHE
-    CLAHE_clip : int
-        passed as clipLimit to cv2.createCLAHE
-    preregister: bool
-        whether to give a hint to cv2.findTransformECC from cv2.phaseCorrelate
-
-    Returns
-    -------
-    tform : :class:`numpy.ndarry`
-        3 x 3 transformation matrix
-
-    img_moving_warped : :class:`numpy.ndarray`
-        warped moving image, same shape as fixed image, uint8
-
-    """
-
-    # read average intensity images
-    with PIL.Image.open(img_path_fixed) as im:
-        img_fixed = np.array(im)
-    with PIL.Image.open(img_path_moving) as im:
-        img_moving = np.array(im)
-
-    # perform contrast adjustment
-    img_fixed = imutils.contrast_adjust(img_fixed, CLAHE_grid, CLAHE_clip)
-    img_moving = imutils.contrast_adjust(img_moving, CLAHE_grid, CLAHE_clip)
-
-    # find the transform
-    tform = imutils.register_image_pair(img_fixed, img_moving, maxCount,
-                                        epsilon, motion_type, gaussFiltSize,
-                                        preregister)
-
-    # warp the moving image
-    img_moving_warped = imutils.warp_image(
-            img_moving,
-            tform,
-            motion_type,
-            img_fixed.shape)
-
-    return tform, img_moving_warped
-
-
 class PairwiseMatching(ArgSchemaParser):
     default_schema = PairwiseMatchingSchema
     default_output_schema = PairwiseOutputSchema
@@ -468,41 +411,55 @@ class PairwiseMatching(ArgSchemaParser):
         """main function call for PairwiseMatching
         """
         self.logger.name = type(self).__name__
-        self.logger.info('Matching %d to %d ...' % (
-            self.args['fixed']['id'],
-            self.args['moving']['id']))
+        logging_prefix = "Matching {} to {}".format(
+                self.args['fixed']['id'],
+                self.args['moving']['id'])
+        self.logger.info(logging_prefix)
 
         # identifying strings for filenames
         fixed_strid = '%s' % self.args['fixed']['id']
         moving_strid = '%s' % self.args['moving']['id']
 
         # register the average intensity images
-        self.tform, moving_warped = register_intensity_images(
-                self.args['fixed'][
-                    'ophys_average_intensity_projection_image'],
-                self.args['moving'][
-                    'ophys_average_intensity_projection_image'],
-                self.args['registration_iterations'],
-                self.args['registration_precision'],
-                self.args['motionType'],
-                self.args['gaussFiltSize'],
-                self.args['CLAHE_grid'],
-                self.args['CLAHE_clip'],
-                preregister=self.args['preregister'])
+        fixp = self.args['fixed']['ophys_average_intensity_projection_image']
+        movp = self.args['moving']['ophys_average_intensity_projection_image']
+        with PIL.Image.open(fixp) as im:
+            img_fixed = np.array(im)
+        with PIL.Image.open(movp) as im:
+            img_moving = np.array(im)
+
+        meta_reg = MetaRegistration(
+                maxCount=self.args['registration_iterations'],
+                epsilon=self.args['registration_precision'],
+                motion_type=self.args['motionType'],
+                gaussFiltSize=self.args['gaussFiltSize'],
+                CLAHE_grid=self.args['CLAHE_grid'],
+                CLAHE_clip=self.args['CLAHE_clip'],
+                edge_buffer=self.args['edge_buffer'],
+                include_original=self.args['include_original'])
+        meta_reg(img_moving, img_fixed)
+        self.logger.info(f"{logging_prefix}: best registration was "
+                         f"{meta_reg.best_candidate}")
+        if meta_reg.best_candidate == ["Identity"]:
+            raise PairwiseException(f"{logging_prefix}: no registration "
+                                    "found")
+        self.tform = meta_reg.best_matrix
 
         if self.args['save_registered_image']:
+            moving_warped = imutils.warp_image(img_moving, self.tform,
+                                               self.args['motionType'],
+                                               img_fixed.shape)
             imfname = os.path.join(
                 self.args['output_directory'],
                 'register_%s_to_%s.tif' % (moving_strid, fixed_strid))
             with PIL.Image.fromarray(moving_warped) as im:
                 im.save(imfname)
 
+        # transform moving segmentation mask
         segmask_fixed_3d = utils.read_tiff_3d(
                 self.args['fixed']['nice_mask_path'])
         segmask_moving_3d = utils.read_tiff_3d(
                 self.args['moving']['nice_mask_path'])
-
-        # transform moving segmentation mask
         segmask_moving_3d_registered = transform_mask(
                 segmask_moving_3d,
                 segmask_fixed_3d.shape[1:],
@@ -523,6 +480,8 @@ class PairwiseMatching(ArgSchemaParser):
                     self.args['maximum_distance'],
                     self.args['assignment_solver'])
 
+        # opencv likes float32, but json does not
+        self.tform = self.tform.astype('float')
         output_json = {
                 'unmatched': self.unmatched,
                 'matches': self.matches,
@@ -530,6 +489,7 @@ class PairwiseMatching(ArgSchemaParser):
                 'fixed_experiment': self.args['fixed']['id'],
                 'moving_experiment': self.args['moving']['id'],
                 'transform': {
+                    "best_registration": meta_reg.best_candidate,
                     "properties": utils.calc_first_order_properties(
                         self.tform),
                     'matrix': self.tform.tolist()

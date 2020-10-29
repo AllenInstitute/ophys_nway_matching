@@ -2,9 +2,10 @@ import numpy as np
 import os
 import json
 import itertools
+import copy
+import multiprocessing
 import pandas as pd
 import networkx as nx
-import multiprocessing
 from nway.pairwise_matching import PairwiseMatching
 from nway.schemas import NwayMatchingSchema, NwayMatchingOutputSchema
 import nway.utils as utils
@@ -378,7 +379,7 @@ class NwayMatching(ArgSchemaParser):
         self.pair_matches = []
         pair_arg_list = []
         for fixed, moving in itertools.combinations(self.experiments, 2):
-            pair_args = dict(self.args)
+            pair_args = copy.deepcopy(self.args)
             # marshmallow 3.0.0rc6 is less forgiving about extra keys around
             # so, pop out the unused shared keys here
             for popkey in [
@@ -400,6 +401,7 @@ class NwayMatching(ArgSchemaParser):
             with multiprocessing.Pool(self.args['parallel_workers']) as pool:
                 self.pair_matches = pool.map(pair_match_job, pair_arg_list)
 
+        self.logger.name = type(self).__name__
         # generate N-way matching table
         matching_frame = self.gen_nway_table_with_redundancy()
 
