@@ -31,6 +31,9 @@ class ExperimentSchema(DefaultSchema):
 
 
 class CommonMatchingSchema(ArgSchema):
+    log_level = Str(
+        default="INFO",
+        description="override argschema default")
     maximum_distance = Int(
         required=False,
         default=10,

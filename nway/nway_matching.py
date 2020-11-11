@@ -1,4 +1,3 @@
-import logging
 import numpy as np
 import os
 import json
@@ -11,9 +10,6 @@ from nway.schemas import NwayMatchingSchema, NwayMatchingOutputSchema
 import nway.utils as utils
 from nway import __version__ as nway_version
 from argschema import ArgSchemaParser
-
-logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
 
 
 class NwayException(Exception):
@@ -348,7 +344,7 @@ class NwayMatching(ArgSchemaParser):
                     len(self.experiments) - 1 - \
                     np.count_nonzero(self.matching_table_nway[i] == -1)
             prob[matching_exp_num] = prob[matching_exp_num] + 1
-            logger.debug(self.matching_table_nway[i])
+            self.logger.debug(self.matching_table_nway[i])
 
         for i in range(cellnum):
             thisrgn = [v for v in self.matching_table_nway[i] if v != -1]
@@ -372,8 +368,9 @@ class NwayMatching(ArgSchemaParser):
         """
         # log this ENV variable, if present
         commit = os.environ.get("NWAY_COMMIT_SHA", None)
-        logger.info(f"NWAY_COMMIT_SHA {commit}")
-        logger.info(f"Nway matching version {nway_version}")
+        self.logger.name = type(self).__name__
+        self.logger.info(f"NWAY_COMMIT_SHA {commit}")
+        self.logger.info(f"Nway matching version {nway_version}")
 
         self.make_masks_from_dicts()
 
@@ -415,11 +412,11 @@ class NwayMatching(ArgSchemaParser):
         self.matching_table_nway = self.add_remaining_cells(
                 matching_table_nway_tmp)
 
-        logger.info("Nway matching is done!")
+        self.logger.info("Nway matching is done!")
 
         output_dict = self.create_output_dict()
         self.output(output_dict, indent=2)
-        logger.info("wrote {}".format(self.args['output_json']))
+        self.logger.info("wrote {}".format(self.args['output_json']))
 
 
 if __name__ == "__main__":  # pragma: no cover
