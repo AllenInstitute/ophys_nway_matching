@@ -22,7 +22,7 @@ jobs:
           command: |
             pip install flake8
             # `|| true` to force exit code 0 even if no files found
-            CHANGED_PYFILES=$(git diff --name-only --diff-filter AM origin/master | grep .py || true)
+            CHANGED_PYFILES=$(git diff --name-only --diff-filter AM origin/main | grep .py || true)
             echo "List of changed files:"
             echo ${CHANGED_PYFILES}
             echo ${CHANGED_PYFILES} | xargs -r flake8 --count
@@ -36,9 +36,9 @@ jobs:
       - run: 
           name: Build and Push docker image
           command: |
-            if [ "$CIRCLE_BRANCH" = "master" ]
+            if [ "$CIRCLE_BRANCH" = "main" ]
             then
-                MYTAG=master
+                MYTAG=main
             else
                 MYTAG=develop
             fi
