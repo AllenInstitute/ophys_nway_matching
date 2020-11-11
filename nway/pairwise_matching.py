@@ -1,5 +1,4 @@
 import os
-import logging
 import numpy as np
 import pandas as pd
 import json
@@ -14,9 +13,6 @@ from argschema import ArgSchemaParser
 from nway.schemas import PairwiseMatchingSchema, PairwiseOutputSchema
 import nway.utils as utils
 import nway.image_processing_utils as imutils
-
-logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
 
 
 def gen_assignment_pairs(cost_matrix, solver):
@@ -471,6 +467,7 @@ class PairwiseMatching(ArgSchemaParser):
     def run(self):
         """main function call for PairwiseMatching
         """
+        self.logger.name = type(self).__name__
         self.logger.info('Matching %d to %d ...' % (
             self.args['fixed']['id'],
             self.args['moving']['id']))

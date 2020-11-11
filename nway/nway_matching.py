@@ -1,18 +1,15 @@
-import logging
 import numpy as np
 import os
 import json
 import itertools
 import pandas as pd
 import networkx as nx
+import multiprocessing
 from nway.pairwise_matching import PairwiseMatching
 from nway.schemas import NwayMatchingSchema, NwayMatchingOutputSchema
 import nway.utils as utils
 from nway import __version__ as nway_version
 from argschema import ArgSchemaParser
-
-logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
 
 
 class NwayException(Exception):
@@ -110,6 +107,13 @@ def prune_matching_table(table, score, method='keepmin'):
     pruned = [table[i] for i in inds]
 
     return pruned
+
+
+def pair_match_job(pair_args):
+    pair_match = PairwiseMatching(input_data=pair_args, args=[])
+    pair_match.run()
+    delattr(pair_match, 'logger')
+    return pair_match
 
 
 class NwayMatching(ArgSchemaParser):
@@ -340,7 +344,7 @@ class NwayMatching(ArgSchemaParser):
                     len(self.experiments) - 1 - \
                     np.count_nonzero(self.matching_table_nway[i] == -1)
             prob[matching_exp_num] = prob[matching_exp_num] + 1
-            logger.debug(self.matching_table_nway[i])
+            self.logger.debug(self.matching_table_nway[i])
 
         for i in range(cellnum):
             thisrgn = [v for v in self.matching_table_nway[i] if v != -1]
@@ -364,13 +368,15 @@ class NwayMatching(ArgSchemaParser):
         """
         # log this ENV variable, if present
         commit = os.environ.get("NWAY_COMMIT_SHA", None)
-        logger.info(f"NWAY_COMMIT_SHA {commit}")
-        logger.info(f"Nway matching version {nway_version}")
+        self.logger.name = type(self).__name__
+        self.logger.info(f"NWAY_COMMIT_SHA {commit}")
+        self.logger.info(f"Nway matching version {nway_version}")
 
         self.make_masks_from_dicts()
 
         # pair-wise matching
         self.pair_matches = []
+        pair_arg_list = []
         for fixed, moving in itertools.combinations(self.experiments, 2):
             pair_args = dict(self.args)
             # marshmallow 3.0.0rc6 is less forgiving about extra keys around
@@ -378,16 +384,21 @@ class NwayMatching(ArgSchemaParser):
             for popkey in [
                     "pruning_method",
                     "experiment_containers",
-                    "save_pairwise_results"]:
+                    "save_pairwise_results",
+                    "parallel_workers"]:
                 pair_args.pop(popkey)
             pair_args["fixed"] = fixed
             pair_args["moving"] = moving
             pair_args["output_json"] = os.path.join(
                     self.args["output_directory"],
                     "{}_to_{}_output.json".format(moving['id'], fixed['id']))
-            self.pair_matches.append(
-                    PairwiseMatching(input_data=pair_args, args=[]))
-            self.pair_matches[-1].run()
+            pair_arg_list.append(pair_args)
+
+        if self.args['parallel_workers'] == 1:
+            self.pair_matches = [pair_match_job(i) for i in pair_arg_list]
+        else:
+            with multiprocessing.Pool(self.args['parallel_workers']) as pool:
+                self.pair_matches = pool.map(pair_match_job, pair_arg_list)
 
         # generate N-way matching table
         matching_frame = self.gen_nway_table_with_redundancy()
@@ -401,11 +412,11 @@ class NwayMatching(ArgSchemaParser):
         self.matching_table_nway = self.add_remaining_cells(
                 matching_table_nway_tmp)
 
-        logger.info("Nway matching is done!")
+        self.logger.info("Nway matching is done!")
 
         output_dict = self.create_output_dict()
         self.output(output_dict, indent=2)
-        logger.info("wrote {}".format(self.args['output_json']))
+        self.logger.info("wrote {}".format(self.args['output_json']))
 
 
 if __name__ == "__main__":  # pragma: no cover
