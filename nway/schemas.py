@@ -120,6 +120,12 @@ class NwayMatchingSchema(CommonMatchingSchema):
                      "    graph neighbors of lowest subgraph score."
                      "'popmax': delete highest scores of subgraphs "
                      "    recursively"))
+    parallel_workers = Int(
+        required=False,
+        missing=3,
+        default=3,
+        description=("number of parallel workers for multiprocessing pool "
+                     "for executing pairwise matching. If 1, runs serially."))
 
 
 class PairwiseMatchingSchema(CommonMatchingSchema):

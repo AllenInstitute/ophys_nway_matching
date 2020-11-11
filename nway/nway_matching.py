@@ -5,6 +5,7 @@ import json
 import itertools
 import pandas as pd
 import networkx as nx
+import multiprocessing
 from nway.pairwise_matching import PairwiseMatching
 from nway.schemas import NwayMatchingSchema, NwayMatchingOutputSchema
 import nway.utils as utils
@@ -110,6 +111,13 @@ def prune_matching_table(table, score, method='keepmin'):
     pruned = [table[i] for i in inds]
 
     return pruned
+
+
+def pair_match_job(pair_args):
+    pair_match = PairwiseMatching(input_data=pair_args, args=[])
+    pair_match.run()
+    delattr(pair_match, 'logger')
+    return pair_match
 
 
 class NwayMatching(ArgSchemaParser):
@@ -371,6 +379,7 @@ class NwayMatching(ArgSchemaParser):
 
         # pair-wise matching
         self.pair_matches = []
+        pair_arg_list = []
         for fixed, moving in itertools.combinations(self.experiments, 2):
             pair_args = dict(self.args)
             # marshmallow 3.0.0rc6 is less forgiving about extra keys around
@@ -378,16 +387,21 @@ class NwayMatching(ArgSchemaParser):
             for popkey in [
                     "pruning_method",
                     "experiment_containers",
-                    "save_pairwise_results"]:
+                    "save_pairwise_results",
+                    "parallel_workers"]:
                 pair_args.pop(popkey)
             pair_args["fixed"] = fixed
             pair_args["moving"] = moving
             pair_args["output_json"] = os.path.join(
                     self.args["output_directory"],
                     "{}_to_{}_output.json".format(moving['id'], fixed['id']))
-            self.pair_matches.append(
-                    PairwiseMatching(input_data=pair_args, args=[]))
-            self.pair_matches[-1].run()
+            pair_arg_list.append(pair_args)
+
+        if self.args['parallel_workers'] == 1:
+            self.pair_matches = [pair_match_job(i) for i in pair_arg_list]
+        else:
+            with multiprocessing.Pool(self.args['parallel_workers']) as pool:
+                self.pair_matches = pool.map(pair_match_job, pair_arg_list)
 
         # generate N-way matching table
         matching_frame = self.gen_nway_table_with_redundancy()
