@@ -59,6 +59,7 @@ def test_default_nway(tmpdir, input_file, greduce):
     output_dir = str(tmpdir.mkdir("nway_default"))
     args['output_json'] = os.path.join(output_dir, 'output.json')
     args['pruning_method'] = greduce
+    args['include_original'] = True
     n = nway.NwayMatching(input_data=args, args=[])
 
     assert n.args['assignment_solver'] == 'Blossom'

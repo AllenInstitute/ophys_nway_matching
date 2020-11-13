@@ -5,8 +5,6 @@ import os
 from jinja2 import Template
 import json
 import itertools
-import cv2
-import PIL.Image
 import nway.utils as utils
 import nway.pairwise_matching as pairwise
 
@@ -108,6 +106,7 @@ def test_real_cost_data(input_file, tmpdir, solver):
             'moving': moving,
             'output_directory': output_dir,
             'assignment_solver': solver,
+            'edge_buffer': 0,
             'output_json': os.path.join(
                     output_dir,
                     "{}_to_{}_output.json".format(moving['id'], fixed['id'])),
@@ -261,71 +260,3 @@ def test_calculate_cost_matrix():
     assert np.all(carr[ind] == 999.5)
     ind = darr <= 10
     assert np.all(carr[ind] == (darr[ind]/10 + 0.5))
-
-
-@pytest.mark.parametrize('CLAHE_grid', [-1, 8])
-@pytest.mark.parametrize('motion', ['MOTION_AFFINE', 'MOTION_HOMOGRAPHY'])
-def test_register_legacy(input_file, tmpdir, motion, CLAHE_grid):
-    """these tests pass with preregister=False
-    """
-    CLAHE_clip = 2.5
-    with open(input_file, 'r') as f:
-        j = json.load(f)
-    impath = (
-            j['experiment_containers']
-            ['ophys_experiments'][0]
-            ['ophys_average_intensity_projection_image'])
-    with PIL.Image.open(impath) as im:
-        imfixed = np.array(im)
-
-    tform = np.array([
-        [0.9, 0.1, 23],
-        [-0.05, 1.02, -34],
-        [0, 0, 1]])
-    immoving = cv2.warpPerspective(
-            imfixed,
-            tform,
-            imfixed.shape[::-1])
-
-    output_dir = str(tmpdir.mkdir("register_test"))
-    fname = os.path.join(output_dir, 'fixed.tif')
-    mname = os.path.join(output_dir, 'moving.tif')
-
-    with PIL.Image.fromarray(immoving) as im:
-        im.save(mname)
-    with PIL.Image.fromarray(imfixed) as im:
-        im.save(fname)
-
-    new_tform, warped = pairwise.register_intensity_images(
-            fname,
-            mname,
-            1000,
-            1.5e-7,
-            motion,
-            5,
-            CLAHE_grid,
-            CLAHE_clip,
-            preregister=False)
-
-    # is the affine transform pretty close to what we put in?
-    assert np.all(np.isclose(tform[0:2, 0:2], new_tform[0:2, 0:2], atol=0.005))
-    # are the translations pretty close to what we put in?
-    assert np.all(np.isclose(tform[:, 2], new_tform[:, 2], atol=2.0))
-
-    # can't align one random image
-    if motion == 'MOTION_AFFINE':
-        randim = np.uint8(np.zeros(imfixed.shape))
-        rname = os.path.join(output_dir, 'random.tif')
-        with PIL.Image.fromarray(randim) as im:
-            im.save(rname)
-        with pytest.raises(cv2.error):
-            new_tform, warped = pairwise.register_intensity_images(
-                    fname,
-                    rname,
-                    1000,
-                    1.5e-7,
-                    motion,
-                    5,
-                    CLAHE_grid,
-                    CLAHE_clip,
-                    preregister=False)

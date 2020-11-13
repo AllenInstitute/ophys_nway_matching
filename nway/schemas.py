@@ -83,14 +83,19 @@ class CommonMatchingSchema(ArgSchema):
         default=2.5,
         missing=2.5,
         description="clipLimit for cv2 CLAHE")
-    preregister = Bool(
+    edge_buffer = Int(
         required=False,
-        default=True,
-        missing=True,
-        description=("if True, cv2.phaseCorrelate will be used to estimate "
-                     "translation offsets before cv2.findTransformECC. This "
-                     "helps when there are significant offsets between two "
-                     "images."))
+        default=40,
+        missing=40,
+        description=("in the Crop transform for meta-registration, this "
+                     "many pixels will be cropped from the top, bottom, "
+                     "left, and right of both images."))
+    include_original = Bool(
+        required=False,
+        default=False,
+        missing=False,
+        description=("whether to include the original registration strategy "
+                     "which occasionally succeeds with a not great result."))
 
     @mm.post_load
     def hungarian_warn(self, data, **kwargs):
