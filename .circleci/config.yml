@@ -5,12 +5,11 @@ jobs:
       tag: "3.8"
     steps:
       - checkout
-      - python/load-cache
-      - python/install-deps
-      - python/save-cache
+      - python/install-packages:
+          pkg-manager: poetry
       - run:
           command: |
-            python -m pytest --cov nway --cov-report xml
+            poetry run python -m pytest --cov nway --cov-report xml
             bash <(curl -s https://codecov.io/bash) -t ${CODECOV_TOKEN}
           name: Test
 
@@ -49,12 +48,12 @@ jobs:
                 --build-arg MYBRANCH=${CIRCLE_BRANCH} \
                 --build-arg COMMIT=${CIRCLE_SHA1} \
                 -t ${image_source} .
-            docker run --entrypoint /bin/bash --read-only --tmpfs /tmp ${image_source} -c "python -m pytest"
+            docker run --read-only --tmpfs /tmp ${image_source} python -m pytest
             docker tag ${image_source} ${image_target}
             docker push ${image_target}
 
 orbs:
-  python: circleci/python@0.3.2
+  python: circleci/python@1.2.1
 version: 2.1
 workflows:
   main:

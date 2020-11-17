@@ -1,0 +1,25 @@
+[tool.poetry]
+name = "ophys_nway_matching"
+version = "0.4.2"
+description = "cell-matching between optical physiology experiments"
+authors = ["Dan Kapner <danielk@alleninstitute.org>"]
+
+[tool.poetry.dependencies]
+python = "^3.8"
+argschema = "2.0.1"
+numpy = "^1.19.4"
+Pillow = "^8.0.1"
+scikit-image = "^0.17.2"
+matplotlib = "^3.3.3"
+pandas = "^1.1.4"
+opencv-python = "^4.4"
+PyPDF2 = "^1.26.0"
+
+[tool.poetry.dev-dependencies]
+pytest = "^6.1.2"
+pytest-cov = "^2.10.1"
+Jinja2 = "^2.11.2"
+
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"
