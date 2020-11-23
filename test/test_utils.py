@@ -25,6 +25,48 @@ def experiments(tmpdir):
     yield rendered['experiment_containers']['ophys_experiments']
 
 
+@pytest.mark.parametrize("suptitle", [None, "stitle"])
+def test_write_pair_images(suptitle, tmpdir):
+    x = np.random.randint(0, 255, size=(512, 512)).astype('uint8')
+    fname = tmpdir / "test.png"
+    fname = utils.write_pair_images(fname, ['a', 'b'], [x, x],
+                                    suptitle=suptitle)
+    assert fname.exists()
+
+
+def test_write_pair_images_exception(tmpdir):
+    x = np.random.randint(0, 255, size=(512, 512)).astype('uint8')
+    fname = tmpdir / "test.png"
+    with pytest.raises(ValueError, match=r"length of titles.*"):
+        fname = utils.write_pair_images(fname, ['a', 'b', 'c'], [x, x])
+
+
+def test_summarize_registration_success(tmpdir):
+    pair_outputs = [
+            {
+                'fixed_experiment': 123,
+                'moving_experiment': 234,
+                'transform': {'best_registration': ['Identity']}},
+            {
+                'fixed_experiment': 234,
+                'moving_experiment': 345,
+                'transform': {'best_registration': ['anything else']}},
+            {
+                'fixed_experiment': 123,
+                'moving_experiment': 345,
+                'transform': {'best_registration': ['anything else']}}]
+    paths = []
+    for i, p in enumerate(pair_outputs):
+        paths.append(tmpdir / f"{i}.json")
+        with open(paths[-1], "w") as fp:
+            json.dump(p, fp)
+    df, id_map = utils.summarize_registration_success(paths)
+    np.testing.assert_array_equal(df.values, np.array([[1, 0, 1],
+                                                       [0, 1, 1],
+                                                       [1, 1, 1]]))
+    assert id_map == {0: 123, 1: 234, 2: 345}
+
+
 def test_mask_from_json(experiments):
     for exp in experiments:
         mask, mdict = utils.labeled_mask_from_experiment(exp)
