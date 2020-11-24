@@ -3,7 +3,92 @@ from skimage.transform import AffineTransform
 import PIL.Image
 import os
 import json
-from typing import List, Any, Tuple
+import pandas as pd
+import matplotlib.pyplot as plt
+from pathlib import Path
+from typing import List, Any, Tuple, Optional
+
+
+def summarize_registration_success(pair_outputs):
+    """checks which pairs succeeded in registratio. tries to keep
+    dataframe small for logging by separating column/index names
+    and returning an idmap also
+
+    Parameters
+    ----------
+    pair_outputs: List[dict]
+        at minimum, each entry is {
+                                     'fixed_experiment': <int>,
+                                     'moving_experiment': <int>,
+                                     'transform': {
+                                                    'best_registration': []
+                                                  }
+                                   }
+
+    Returns
+    -------
+    df: pd.DataFrame
+        boolean-valued dataframe, sorted both in rows and columns
+        row/column names replaced with integers
+    id_map: dict
+        map of row/column names to experiment ids. can be used to reconstruct
+        named rows and columns with:
+        df = df.rename(index=id_map, columns=id_map)
+
+    """
+    df = pd.DataFrame()
+    for pair_output in pair_outputs:
+        with open(pair_output, "r") as f:
+            j = json.load(f)
+        success = 1
+        if j['transform']['best_registration'] == ['Identity']:
+            success = 0
+        df.loc[j['fixed_experiment'], j['moving_experiment']] = success
+        df.loc[j['moving_experiment'], j['fixed_experiment']] = success
+    df = df.sort_index(0)
+    df = df.sort_index(1)
+    id_map = {v: i for i, v in enumerate(df.index)}
+    for v in id_map.keys():
+        df.loc[v, v] = 1
+    df = df.rename(index=id_map, columns=id_map)
+    df = df.astype(int)
+    id_map = {v: k for k, v in id_map.items()}
+    return df, id_map
+
+
+def write_pair_images(output_path: Path, titles: List[str],
+                      images: List[np.ndarray],
+                      suptitle: Optional[str] = None) -> Path:
+    """make a plot of images and write to disk
+
+    Parameters
+    ----------
+    output_path: Path
+        destination file
+    titles: List[str]
+        titles for the subplots
+    images: List[np.ndarray]
+        images for the subplots
+    suptitle: str
+        supertitle for the figure
+
+    Return
+    ------
+    output_path: Path
+        output path
+
+    """
+    if len(titles) != len(images):
+        raise ValueError(f"length of titles {len(titles)} does not match "
+                         f"length of images {len(images)}.")
+    f, a = plt.subplots(1, len(images), clear=True, num=1, figsize=(12, 8))
+    for ax, image, title in zip(a, images, titles):
+        ax.imshow(image, cmap='gray')
+        ax.set_title(title)
+    if suptitle is not None:
+        f.suptitle(suptitle)
+    f.savefig(output_path)
+    return output_path
 
 
 def create_nice_mask(experiment, output_directory):

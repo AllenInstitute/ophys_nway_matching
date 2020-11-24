@@ -402,6 +402,13 @@ class NwayMatching(ArgSchemaParser):
                 self.pair_matches = pool.map(pair_match_job, pair_arg_list)
 
         self.logger.name = type(self).__name__
+        df, id_map = utils.summarize_registration_success(
+                [p.args['output_json'] for p in self.pair_matches])
+        self.logger.info(f"registration success(1) or failure (0):\n{df}\n"
+                         f"id map{json.dumps(id_map, indent=2)}")
+        if not df.all(axis=None):
+            raise NwayException("not all pairwise registrations succeeded.")
+
         # generate N-way matching table
         matching_frame = self.gen_nway_table_with_redundancy()
 

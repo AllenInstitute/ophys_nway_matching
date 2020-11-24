@@ -8,6 +8,8 @@ import scipy.spatial
 import scipy.optimize
 import networkx as nx
 import itertools
+import datetime
+from pathlib import Path
 from argschema import ArgSchemaParser
 
 from nway.schemas import PairwiseMatchingSchema, PairwiseOutputSchema
@@ -440,10 +442,39 @@ class PairwiseMatching(ArgSchemaParser):
         meta_reg(img_moving, img_fixed)
         self.logger.info(f"{logging_prefix}: best registration was "
                          f"{meta_reg.best_candidate}")
-        if meta_reg.best_candidate == ["Identity"]:
-            raise PairwiseException(f"{logging_prefix}: no registration "
-                                    "found")
+
         self.tform = meta_reg.best_matrix
+
+        if meta_reg.best_candidate == ["Identity"]:
+            self.tform = self.tform.astype('float')
+            output_json = {
+                    'unmatched': {},
+                    'matches': [],
+                    'rejected': [],
+                    'fixed_experiment': self.args['fixed']['id'],
+                    'moving_experiment': self.args['moving']['id'],
+                    'transform': {
+                        "best_registration": meta_reg.best_candidate,
+                        "properties": utils.calc_first_order_properties(
+                            self.tform),
+                        'matrix': self.tform.tolist()
+                        }
+                    }
+            self.output(output_json, indent=2)
+            fname = "avg_projections_{}_{}_{}.png".format(
+                self.args['fixed']['id'], self.args['moving']['id'],
+                datetime.datetime.now().strftime("%Y%m%d%H%M%S"))
+            fpath = utils.write_pair_images(
+                        Path(self.args['output_directory']) / fname,
+                        titles=[
+                            self.args['fixed']['id'],
+                            self.args['moving']['id']],
+                        images=[img_fixed, img_moving],
+                        suptitle=("failed to find registration for these "
+                                  "average projection pairs."))
+            self.logger.warn(f"{logging_prefix}: no registration found. "
+                             f"wrote {fpath}")
+            return
 
         if self.args['save_registered_image']:
             moving_warped = imutils.warp_image(img_moving, self.tform,
