@@ -457,7 +457,8 @@ class PairwiseMatching(ArgSchemaParser):
                         "best_registration": meta_reg.best_candidate,
                         "properties": utils.calc_first_order_properties(
                             self.tform),
-                        'matrix': self.tform.tolist()
+                        'matrix': self.tform.tolist(),
+                        'transform_type': "IDENTITY"
                         }
                     }
             self.output(output_json, indent=2)
@@ -523,7 +524,8 @@ class PairwiseMatching(ArgSchemaParser):
                     "best_registration": meta_reg.best_candidate,
                     "properties": utils.calc_first_order_properties(
                         self.tform),
-                    'matrix': self.tform.tolist()
+                    'matrix': self.tform.tolist(),
+                    'transform_type': self.args['motionType']
                     }
                 }
         self.output(output_json, indent=2)
