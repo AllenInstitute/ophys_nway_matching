@@ -563,8 +563,8 @@ class NwaySummary(ArgSchemaParser):
 
         pdf_save_path = save_dir / f"nway_match_summary_plots_{timestamp}.pdf" 
         pdf = PdfPages(pdf_save_path)
-        pdf.savefig(fig1)
-        pdf.savefig(fig2)
+        pdf.savefig(fig1, dpi=300, bbox_inches="tight")
+        pdf.savefig(fig2, dpi=300, bbox_inches="tight")
         pdf.close()
 
 
