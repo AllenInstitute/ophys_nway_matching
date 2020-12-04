@@ -14,6 +14,7 @@ from argschema import ArgSchemaParser
 
 from nway.diagnostics import NwaySummary
 
+
 class NwayException(Exception):
     pass
 
@@ -364,7 +365,6 @@ class NwayMatching(ArgSchemaParser):
 
         return matchingdata
 
-
     def run(self):
         """Nway cell matching by calling pairwise
            matching and then combining the results
@@ -421,9 +421,8 @@ class NwayMatching(ArgSchemaParser):
                 matching_table_nway_tmp)
         self.logger.info("Nway matching is done!")
 
+        # Generate first part of output dict (necessary for summary plots)
         output_dict = self.create_output_dict()
-        self.output(output_dict, indent=2)
-        self.logger.info("wrote {}".format(self.args['output_json']))
 
         # Generate nway match summary plots
         self.logger.info("Creating match summary plots")
@@ -432,7 +431,11 @@ class NwayMatching(ArgSchemaParser):
                         'nway_output': output_dict,
                         'output_directory': self.args["output_directory"]},
             args=[])
-        nway_summarizer.run()
+        plot_save_paths: dict = nway_summarizer.run()
+
+        output_dict.update(plot_save_paths)
+        self.output(output_dict, indent=2)
+        self.logger.info("wrote {}".format(self.args['output_json']))
 
 
 if __name__ == "__main__":  # pragma: no cover

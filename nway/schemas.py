@@ -162,6 +162,15 @@ class NwayMatchingOutputSchema(DefaultSchema):
         Dict,
         required=True,
         description="list of pairwise result dicts")
+    nway_match_fraction_plot = OutputFile(
+        required=True,
+        description="Path of match fraction plot *.png")
+    nway_warp_overlay_plot = OutputFile(
+        required=True,
+        description="Path of warp overlay plot *.png")
+    nway_warp_summary_plot = OutputFile(
+        required=True,
+        description="Path of warp summary plot *.png")
 
 
 class PairwiseOutputSchema(DefaultSchema):
@@ -219,7 +228,6 @@ class NwayMatchSummarySchema(ArgSchema):
         required=True,
         description="Destination for summary plot output file(s).")
 
-
     @mm.pre_load
     def fill_dict_inputs(self, data: dict, **kwargs) -> dict:
         if not data['nway_input']:
@@ -229,7 +237,7 @@ class NwayMatchSummarySchema(ArgSchema):
         elif data.get('input_file'):
             logger.warning("Both --nway_input and --input_file were provided "
                            "so --input_file will be ignored.")
-        
+
         if not data['nway_output']:
             with open(data['output_file'], 'r') as f:
                 output_dict = json.load(f)
