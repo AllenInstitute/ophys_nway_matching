@@ -4,8 +4,8 @@ import shutil
 import time
 
 import matplotlib
-import matplotlib.gridspec as gridspec  # noqa: E402
-import matplotlib.pyplot as plt  # noqa: E402
+import matplotlib.gridspec as gridspec
+import matplotlib.pyplot as plt
 import numpy as np
 import nway.diagnostics as nwdi
 import PIL.Image
