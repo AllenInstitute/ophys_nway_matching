@@ -140,9 +140,6 @@ def create_nice_mask(experiment, output_directory):
         json.dump(full_dict, f, indent=2)
 
     experiment['nice_dict_path'] = dict_path
-    # marshmallow 3.0.0rc6 is less forgiving about extra keys around
-    # so, pop out the unused extra keys here
-    experiment.pop('stimulus_name')
 
     return experiment
 

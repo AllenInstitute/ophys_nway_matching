@@ -1,12 +1,22 @@
-from matplotlib.backends.backend_pdf import PdfPages
-import matplotlib.pyplot as plt
-import matplotlib.gridspec as gridspec
-import json
-import numpy as np
 import itertools
-from argschema import ArgSchemaParser
-from nway.schemas import NwayDiagnosticSchema
+import json
 import os
+import time
+from pathlib import Path
+from typing import Tuple
+
+import matplotlib.gridspec as gridspec
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+import PIL.Image
+from argschema import ArgSchemaParser
+from matplotlib.backends.backend_pdf import PdfPages
+from matplotlib.figure import Figure
+from skimage.metrics import structural_similarity
+
+import nway.image_processing_utils as imutils
+from nway.schemas import NwayDiagnosticSchema, NwayMatchSummarySchema
 
 
 def cell_experiment_dict(nway_output_path):
@@ -359,6 +369,336 @@ def plot_all(nway_output_path, fname=None):
         p.savefig(fig2)
         p.savefig(fig3)
         p.close()
+
+
+def create_nway_input_maps(nway_input: dict) -> Tuple[dict, dict]:
+    """Create mappings between experiment id, experiment stimulus name,
+    and the average intensity projection image arrays.
+
+    Parameters
+    ----------
+    nway_input : dict
+        The 'input.json' in dictionary form passed to the nway matching
+        module.
+
+    Returns
+    -------
+    Tuple[dict, dict]
+        A tuple of two mappings. The first mapping relates experiment ids to
+        experiment stimulus names. The second mapping relates experiment ids
+        to the average intensity projection image array for the experiment.
+    """
+    ophys_expts = nway_input['experiment_containers']['ophys_experiments']
+
+    expt_id_stim_name_map = dict()
+    expt_id_avg_image_map = dict()
+    for expt in ophys_expts:
+        stimulus_name = expt.get('stimulus_name')
+        if stimulus_name is None:
+            stimulus_name = 'Unknown Stimulus'
+        expt_id_stim_name_map[expt['id']] = stimulus_name
+
+        avg_image_key = 'ophys_average_intensity_projection_image'
+        with PIL.Image.open(expt[avg_image_key]) as im:
+            expt_avg_image = np.array(im)
+        expt_id_avg_image_map[expt['id']] = expt_avg_image
+
+    expt_id_stim_name_map = {k: v for k, v
+                             in sorted(expt_id_stim_name_map.items(),
+                                       key=lambda x: str(x[1]))}
+
+    return (expt_id_stim_name_map, expt_id_avg_image_map)
+
+
+def create_nway_summary_df(expt_id_stim_name_map: dict,
+                           expt_id_avg_image_map: dict,
+                           nway_output: dict) -> pd.DataFrame:
+    """Create an nway matching summary dataframe necessary for plotting
+    match fractions and assessing average image registrations.
+
+    Parameters
+    ----------
+    expt_id_stim_name_map : dict
+        A mapping that relates experiment ids to experiment stimulus names.
+        Produced by 'create_nway_input_maps'.
+    expt_id_avg_img_map : dict
+        A mapping that relates experiment ids to the average intensity
+        projection image array for the experiment. Produced by
+        'create_nway_input_maps'.
+    nway_output : dict
+        The 'output.json' in dictionary form produced by the nway matching
+        module.
+
+    Returns
+    -------
+    pd.DataFrame
+        A pandas DataFrame with the following columns:
+
+        fixed_expt (int): The experiment id of the alignment target
+        fixed_expt_stim_name (str): The stimulus name for the fixed expt
+        moving_expt (int): The experiment id of the image to align
+        moving_expt_stim_name (str): The stimulus name for the moving expt
+        n_unmatched_fixed (int): Number of ROIs from the fixed experiment which
+            could not be matched to a moving experiment's ROI
+        n_unmatched_moving (int): Number of ROIs from the moving experiment
+            which could not be matched to a fixed experiment's ROI
+        n_matches (int): Number of ROIs that were matched between fixed and
+            moving experiments
+        n_total (int): The total number of ROIs to match
+        fraction_matched (float): n_matches divided by n_total
+
+        This DataFrame additionally contains the following attributes keys:
+
+        warped_images: A mapping that relates a pairwise match to a warped
+            registration image
+        expt_id_stim_name_map: A mapping that relates an experiment's id with a
+            stimulus name (describing the type of experiment)
+        expt_id_avg_image_map: A mapping that relates an experiment's id with
+            the experiment's average intensity projection image array
+    """
+    pairwise_results = nway_output['pairwise_results']
+
+    warped_avg_image_maps = dict()
+    df_list = []
+    for pair in pairwise_results:
+        # Assemble match statistics
+        fixed_expt = pair['fixed_experiment']
+        fixed_expt_stim_name = expt_id_stim_name_map[fixed_expt]
+
+        moving_expt = pair['moving_experiment']
+        moving_expt_stim_name = expt_id_stim_name_map[moving_expt]
+
+        n_unmatched_fixed = len(pair['unmatched']['fixed'])
+        n_unmatched_moving = len(pair['unmatched']['moving'])
+        n_matches = len(pair['matches'])
+        n_total = n_matches + n_unmatched_fixed + n_unmatched_moving
+        fraction_matched = n_matches / float(n_total)
+        df_list.append([fixed_expt, fixed_expt_stim_name, moving_expt,
+                        moving_expt_stim_name, n_unmatched_fixed,
+                        n_unmatched_moving, n_matches, n_total,
+                        fraction_matched])
+
+        # Recreate warped images
+        transform_matrix = np.array(pair['transform']['matrix'])
+        transform_type = pair['transform']['transform_type']
+        fixed_img = expt_id_avg_image_map[fixed_expt]
+        moving_img = expt_id_avg_image_map[moving_expt]
+
+        moving_warped = imutils.warp_image(moving_img, transform_matrix,
+                                           transform_type, fixed_img.shape)
+        warped_img_key_1 = f"{moving_expt}_to_{fixed_expt}"
+        warped_avg_image_maps[warped_img_key_1] = moving_warped
+
+        inv_transform = np.linalg.inv(transform_matrix)
+        fixed_warped = imutils.warp_image(fixed_img, inv_transform,
+                                          transform_type, moving_img.shape)
+        warped_img_key_2 = f"{fixed_expt}_to_{moving_expt}"
+        warped_avg_image_maps[warped_img_key_2] = fixed_warped
+
+    columns = ['fixed_expt', 'fixed_expt_stim_name', 'moving_expt',
+               'moving_expt_stim_name', 'n_unmatched_fixed',
+               'n_unmatched_moving', 'n_matches', 'n_total',
+               'fraction_matched']
+    nway_summary_df = pd.DataFrame(df_list, columns=columns)
+    nway_summary_df = nway_summary_df.sort_values(by=['fixed_expt_stim_name',
+                                                      'moving_expt_stim_name'],
+                                                  ignore_index=True)
+    nway_summary_df.attrs['warped_images'] = warped_avg_image_maps
+    nway_summary_df.attrs['expt_id_stim_name_map'] = expt_id_stim_name_map
+    nway_summary_df.attrs['expt_id_avg_image_map'] = expt_id_avg_image_map
+
+    return nway_summary_df
+
+
+def plot_container_match_fraction(nway_summary_df: pd.DataFrame) -> Figure:
+    """Given an nway summary DataFrame, produce a plot summarizing ROI
+    match fractions.
+    """
+    expt_id_stim_name_map = nway_summary_df.attrs['expt_id_stim_name_map']
+    expt_ids = expt_id_stim_name_map.keys()
+
+    match_frac_mtx = pd.DataFrame(index=expt_ids,
+                                  columns=expt_ids,
+                                  dtype=float)
+    for _, row in nway_summary_df.iterrows():
+        match_fraction = row['fraction_matched']
+        match_frac_mtx[row['fixed_expt']][row['moving_expt']] = match_fraction
+        match_frac_mtx[row['moving_expt']][row['fixed_expt']] = match_fraction
+    np.fill_diagonal(match_frac_mtx.values, 1.0)
+
+    fig, ax = plt.subplots(figsize=(12, 12))
+    mat_ax = ax.matshow(match_frac_mtx, vmin=0.0, vmax=1.0, cmap='magma')
+
+    for (i, j), data in np.ndenumerate(match_frac_mtx.values):
+        if i == j:
+            ax.text(j, i, f'{data:.3f}', ha='center', va='center',
+                    fontsize=18)
+        else:
+            ax.text(j, i, f'{data:.3f}', ha='center', va='center',
+                    fontsize=18, color='white')
+
+    ax.xaxis.set_ticks_position('bottom')
+    xy_labels = [f"{stim_name} (Expt: {expt_id})"
+                 for expt_id, stim_name in expt_id_stim_name_map.items()]
+    ax.set_xticks(list(range(len(expt_ids))))
+    ax.set_xticklabels(xy_labels, fontsize=18, rotation=45, ha='right')
+    ax.set_yticks(list(range(len(expt_ids))))
+    ax.set_yticklabels(xy_labels, fontsize=18)
+
+    plt.title("Fraction matched ROIs across sessions", fontsize=24, pad=20)
+    fig.colorbar(mat_ax)
+    return fig
+
+
+def plot_container_warp_overlays(nway_summary_df: pd.DataFrame) -> Figure:
+    """Given an nway summary DataFrame, produce a plot that shows the
+    overlap of experiment average intensity projection images after
+    registration.
+    """
+    expt_id_stim_name_map = nway_summary_df.attrs['expt_id_stim_name_map']
+    expt_ids = expt_id_stim_name_map.keys()
+
+    expt_id_avg_image_map = nway_summary_df.attrs['expt_id_avg_image_map']
+    warped_images_map = nway_summary_df.attrs['warped_images']
+
+    panel_len = len(expt_ids) + 1
+
+    fig, axes = plt.subplots(nrows=panel_len,
+                             ncols=panel_len,
+                             figsize=(25, 25))
+    # Turn off all axes in subplots
+    for ax in axes.ravel():
+        ax.set_axis_off()
+
+    # plot unwarped base images
+    for idx, _id in enumerate(expt_ids, start=1):
+        session_type = '_'.join(expt_id_stim_name_map[_id].split('_')[:2])
+
+        axes[0][idx].imshow(expt_id_avg_image_map[_id], cmap='gray')
+        axes[0][idx].set_title(f"Expt: {_id}\n{session_type}", fontsize=18)
+        axes[idx][0].imshow(expt_id_avg_image_map[_id], cmap='gray')
+        axes[idx][0].set_title(f"Expt: {_id}\n{session_type}",
+                               x=-0.5, y=0.4, fontsize=18)
+
+    # plot warped 'moving' expt image on 'fixed' expt image
+    for row, expt_1 in enumerate(expt_ids, start=1):
+        for col, expt_2 in enumerate(expt_ids, start=1):
+            if expt_1 == expt_2:
+                continue
+            else:
+                expt_1_avg_img = expt_id_avg_image_map[expt_1]
+                norm_expt_1_avg_img = (
+                    expt_1_avg_img / float(np.amax(expt_1_avg_img)))
+
+                warp_key = f"{expt_2}_to_{expt_1}"
+                warped_avg_img = warped_images_map[warp_key]
+
+                norm_warped_avg_img = (
+                    warped_avg_img / float(np.amax(warped_avg_img)))
+
+                img_shape = norm_expt_1_avg_img.shape
+                combined_img = np.zeros((img_shape[0], img_shape[1], 3))
+                combined_img[:, :, 0] = norm_expt_1_avg_img
+                combined_img[:, :, 1] = norm_warped_avg_img
+
+                axes[row][col].imshow(combined_img)
+                ssim = structural_similarity(norm_expt_1_avg_img,
+                                             norm_warped_avg_img,
+                                             gaussian_weights=True)
+                axes[row][col].set_title(f"SSIM: {ssim:.3f}", fontsize=16)
+
+    fig.tight_layout()
+    return fig
+
+
+def plot_container_warp_summary(nway_summary_df: pd.DataFrame) -> Figure:
+    """Given an nway summary DataFrame, produce a plot that shows in
+    greater detail the quality of the registration between experiment
+    average intensity projection images.
+    """
+    expt_id_avg_image_map = nway_summary_df.attrs['expt_id_avg_image_map']
+    warped_images_map = nway_summary_df.attrs['warped_images']
+
+    num_ax_cols = len(nway_summary_df.index)
+
+    fig, axes = plt.subplots(nrows=4,
+                             ncols=num_ax_cols,
+                             figsize=(30, 10))
+    # Turn off all axes in subplots
+    for ax in axes.ravel():
+        ax.set_axis_off()
+
+    for idx, row in nway_summary_df.iterrows():
+        fixed_expt = row['fixed_expt']
+        moving_expt = row['moving_expt']
+
+        moving_image = expt_id_avg_image_map[moving_expt]
+        fixed_image = expt_id_avg_image_map[fixed_expt]
+        warp_key = f"{moving_expt}_to_{fixed_expt}"
+        warped_image = warped_images_map[warp_key]
+
+        norm_fixed_image = fixed_image / float(np.amax(fixed_image))
+        norm_warped_image = warped_image / float(np.amax(warped_image))
+        img_shape = norm_fixed_image.shape
+        combined_img = np.zeros((img_shape[0], img_shape[1], 3))
+        combined_img[:, :, 0] = norm_fixed_image
+        combined_img[:, :, 1] = norm_warped_image
+
+        ssim = structural_similarity(fixed_image, warped_image,
+                                     gaussian_weights=True)
+
+        moving_stimulus_name = row['moving_expt_stim_name']
+        moving_session_type = '_'.join(moving_stimulus_name.split('_')[:2])
+        fixed_stimulus_name = row['fixed_expt_stim_name']
+        fixed_session_type = '_'.join(fixed_stimulus_name.split('_')[:2])
+
+        axes[0][idx].imshow(moving_image, cmap='gray')
+        axes[0][idx].set_title(f"Moving\n{moving_expt}\n{moving_session_type}")
+
+        axes[1][idx].imshow(fixed_image, cmap='gray')
+        axes[1][idx].set_title(f"Fixed\n{fixed_expt}\n{fixed_session_type}")
+
+        axes[2][idx].imshow(warped_image, cmap='gray')
+        axes[2][idx].set_title(f"Registered\n{moving_expt}")
+
+        axes[3][idx].imshow(combined_img)
+        axes[3][idx].set_title(f"SSIM\n{ssim:.3f}", fontsize=16)
+
+    fig.tight_layout()
+    return fig
+
+
+class NwaySummary(ArgSchemaParser):
+    default_schema = NwayMatchSummarySchema
+
+    def run(self) -> dict:
+        input_maps = create_nway_input_maps(self.args['nway_input'])
+        expt_id_stim_name_map, expt_id_avg_image_map = input_maps
+
+        summary_df = create_nway_summary_df(expt_id_stim_name_map,
+                                            expt_id_avg_image_map,
+                                            self.args['nway_output'])
+
+        fig1 = plot_container_match_fraction(summary_df)
+        fig2 = plot_container_warp_overlays(summary_df)
+        fig3 = plot_container_warp_summary(summary_df)
+
+        save_dir = Path(self.args['output_directory'])
+        timestamp = time.strftime('%Y_%m_%d_%H_%M_%S', time.localtime())
+
+        fig1_save_path = save_dir / f"nway_match_fraction_plot_{timestamp}.png"
+        fig2_save_path = save_dir / f"nway_warp_overlay_plot_{timestamp}.png"
+        fig3_save_path = save_dir / f"nway_warp_summary_plot_{timestamp}.png"
+
+        fig1.savefig(fig1_save_path, dpi=300, bbox_inches="tight")
+        fig2.savefig(fig2_save_path, dpi=300, bbox_inches="tight")
+        fig3.savefig(fig3_save_path, dpi=300, bbox_inches="tight")
+
+        return {
+            "nway_match_fraction_plot": str(fig1_save_path),
+            "nway_warp_overlay_plot": str(fig2_save_path),
+            "nway_warp_summary_plot": str(fig3_save_path)
+        }
 
 
 class NwayDiagnostics(ArgSchemaParser):

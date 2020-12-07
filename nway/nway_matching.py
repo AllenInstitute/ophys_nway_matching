@@ -12,6 +12,8 @@ import nway.utils as utils
 from nway import __version__ as nway_version
 from argschema import ArgSchemaParser
 
+from nway.diagnostics import NwaySummary
+
 
 class NwayException(Exception):
     pass
@@ -411,19 +413,27 @@ class NwayMatching(ArgSchemaParser):
 
         # generate N-way matching table
         matching_frame = self.gen_nway_table_with_redundancy()
-
         matching_table_nway_tmp = self.remove_nway_table_redundancy(
                 matching_frame)
-
         matching_table_nway_tmp = self.prune_matching_graph(
                 matching_table_nway_tmp)
-
         self.matching_table_nway = self.add_remaining_cells(
                 matching_table_nway_tmp)
-
         self.logger.info("Nway matching is done!")
 
+        # Generate first part of output dict (necessary for summary plots)
         output_dict = self.create_output_dict()
+
+        # Generate nway match summary plots
+        self.logger.info("Creating match summary plots")
+        nway_summarizer = NwaySummary(
+            input_data={'nway_input': self.args,
+                        'nway_output': output_dict,
+                        'output_directory': self.args["output_directory"]},
+            args=[])
+        plot_save_paths: dict = nway_summarizer.run()
+
+        output_dict.update(plot_save_paths)
         self.output(output_dict, indent=2)
         self.logger.info("wrote {}".format(self.args['output_json']))
 

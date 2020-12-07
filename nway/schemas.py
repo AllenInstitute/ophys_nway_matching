@@ -6,6 +6,7 @@ from argschema.fields import (
         OutputFile, Bool)
 import marshmallow as mm
 import logging
+import json
 
 logger = logging.getLogger(__name__)
 
@@ -17,6 +18,10 @@ class ExperimentSchema(DefaultSchema):
     ophys_average_intensity_projection_image = InputFile(
         required=True,
         description="max projection intensity image")
+    stimulus_name = Str(
+        required=False,
+        allow_none=True,
+        description="Name of stimulus for a given experiment")
     cell_rois = List(
         Dict,
         required=True,
@@ -142,7 +147,7 @@ class PairwiseMatchingSchema(CommonMatchingSchema):
         description="destination for output files.")
     save_registered_image = Boolean(
         required=False,
-        default=True,
+        default=False,
         description='Whether to save registered image.')
     fixed = Nested(ExperimentSchema)
     moving = Nested(ExperimentSchema)
@@ -157,6 +162,15 @@ class NwayMatchingOutputSchema(DefaultSchema):
         Dict,
         required=True,
         description="list of pairwise result dicts")
+    nway_match_fraction_plot = OutputFile(
+        required=True,
+        description="Path of match fraction plot *.png")
+    nway_warp_overlay_plot = OutputFile(
+        required=True,
+        description="Path of warp overlay plot *.png")
+    nway_warp_summary_plot = OutputFile(
+        required=True,
+        description="Path of warp summary plot *.png")
 
 
 class PairwiseOutputSchema(DefaultSchema):
@@ -191,3 +205,45 @@ class NwayDiagnosticSchema(ArgSchema):
         missing=False,
         default=False,
         descriptip="output to same directory as input")
+
+
+class NwayMatchSummarySchema(ArgSchema):
+    input_file = InputFile(
+        required=False,
+        desc="Input *.json file path to nway matching."
+    )
+    output_file = InputFile(
+        required=False,
+        desc="Output *.json file from nway matching."
+    )
+    nway_input = Dict(
+        required=True,
+        desc="Input to nway matching in Python dictionary form."
+    )
+    nway_output = Dict(
+        required=True,
+        desc="Output of nway matching in Python dictionary form."
+    )
+    output_directory = OutputDir(
+        required=True,
+        description="Destination for summary plot output file(s).")
+
+    @mm.pre_load
+    def fill_dict_inputs(self, data: dict, **kwargs) -> dict:
+        if not data['nway_input']:
+            with open(data['input_file'], 'r') as f:
+                input_dict = json.load(f)
+            data['nway_input'] = input_dict
+        elif data.get('input_file'):
+            logger.warning("Both --nway_input and --input_file were provided "
+                           "so --input_file will be ignored.")
+
+        if not data['nway_output']:
+            with open(data['output_file'], 'r') as f:
+                output_dict = json.load(f)
+            data['nway_output'] = output_dict
+        elif data.get('output_file'):
+            logger.warning("Both --nway_output and --output_file were "
+                           "provided so --output_file will be ignored.")
+
+        return data
