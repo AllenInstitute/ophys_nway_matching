@@ -372,7 +372,22 @@ def plot_all(nway_output_path, fname=None):
 
 
 def create_nway_input_maps(nway_input: dict) -> Tuple[dict, dict]:
+    """Create mappings between experiment id, experiment stimulus name,
+    and the average intensity projection image arrays.
 
+    Parameters
+    ----------
+    nway_input : dict
+        The 'input.json' in dictionary form passed to the nway matching
+        module.
+
+    Returns
+    -------
+    Tuple[dict, dict]
+        A tuple of two mappings. The first mapping relates experiment ids to
+        experiment stimulus names. The second mapping relates experiment ids
+        to the average intensity projection image array for the experiment.
+    """
     ophys_expts = nway_input['experiment_containers']['ophys_experiments']
 
     expt_id_stim_name_map = dict()
@@ -395,11 +410,52 @@ def create_nway_input_maps(nway_input: dict) -> Tuple[dict, dict]:
     return (expt_id_stim_name_map, expt_id_avg_image_map)
 
 
-def create_nway_summary_df(nway_input: dict,
+def create_nway_summary_df(expt_id_stim_name_map: dict,
+                           expt_id_avg_image_map: dict,
                            nway_output: dict) -> pd.DataFrame:
+    """Create an nway matching summary dataframe necessary for plotting
+    match fractions and assessing average image registrations.
 
-    input_maps = create_nway_input_maps(nway_input)
-    expt_id_stim_name_map, expt_id_avg_image_map = input_maps
+    Parameters
+    ----------
+    expt_id_stim_name_map : dict
+        A mapping that relates experiment ids to experiment stimulus names.
+        Produced by 'create_nway_input_maps'.
+    expt_id_avg_img_map : dict
+        A mapping that relates experiment ids to the average intensity
+        projection image array for the experiment. Produced by
+        'create_nway_input_maps'.
+    nway_output : dict
+        The 'output.json' in dictionary form produced by the nway matching
+        module.
+
+    Returns
+    -------
+    pd.DataFrame
+        A pandas DataFrame with the following columns:
+
+        fixed_expt (int): The experiment id of the alignment target
+        fixed_expt_stim_name (str): The stimulus name for the fixed expt
+        moving_expt (int): The experiment id of the image to align
+        moving_expt_stim_name (str): The stimulus name for the moving expt
+        n_unmatched_fixed (int): Number of ROIs from the fixed experiment which
+            could not be matched to a moving experiment's ROI
+        n_unmatched_moving (int): Number of ROIs from the moving experiment
+            which could not be matched to a fixed experiment's ROI
+        n_matches (int): Number of ROIs that were matched between fixed and
+            moving experiments
+        n_total (int): The total number of ROIs to match
+        fraction_matched (float): n_matches divided by n_total
+
+        This DataFrame additionally contains the following attributes keys:
+
+        warped_images: A mapping that relates a pairwise match to a warped
+            registration image
+        expt_id_stim_name_map: A mapping that relates an experiment's id with a
+            stimulus name (describing the type of experiment)
+        expt_id_avg_image_map: A mapping that relates an experiment's id with
+            the experiment's average intensity projection image array
+    """
     pairwise_results = nway_output['pairwise_results']
 
     warped_avg_image_maps = dict()
@@ -455,6 +511,9 @@ def create_nway_summary_df(nway_input: dict,
 
 
 def plot_container_match_fraction(nway_summary_df: pd.DataFrame) -> Figure:
+    """Given an nway summary DataFrame, produce a plot summarizing ROI
+    match fractions.
+    """
     expt_id_stim_name_map = nway_summary_df.attrs['expt_id_stim_name_map']
     expt_ids = expt_id_stim_name_map.keys()
 
@@ -492,6 +551,10 @@ def plot_container_match_fraction(nway_summary_df: pd.DataFrame) -> Figure:
 
 
 def plot_container_warp_overlays(nway_summary_df: pd.DataFrame) -> Figure:
+    """Given an nway summary DataFrame, produce a plot that shows the
+    overlap of experiment average intensity projection images after
+    registration.
+    """
     expt_id_stim_name_map = nway_summary_df.attrs['expt_id_stim_name_map']
     expt_ids = expt_id_stim_name_map.keys()
 
@@ -549,6 +612,10 @@ def plot_container_warp_overlays(nway_summary_df: pd.DataFrame) -> Figure:
 
 
 def plot_container_warp_summary(nway_summary_df: pd.DataFrame) -> Figure:
+    """Given an nway summary DataFrame, produce a plot that shows in
+    greater detail the quality of the registration between experiment
+    average intensity projection images.
+    """
     expt_id_avg_image_map = nway_summary_df.attrs['expt_id_avg_image_map']
     warped_images_map = nway_summary_df.attrs['warped_images']
 
@@ -605,7 +672,11 @@ class NwaySummary(ArgSchemaParser):
     default_schema = NwayMatchSummarySchema
 
     def run(self) -> dict:
-        summary_df = create_nway_summary_df(self.args['nway_input'],
+        input_maps = create_nway_input_maps(self.args['nway_input'])
+        expt_id_stim_name_map, expt_id_avg_image_map = input_maps
+
+        summary_df = create_nway_summary_df(expt_id_stim_name_map,
+                                            expt_id_avg_image_map,
                                             self.args['nway_output'])
 
         fig1 = plot_container_match_fraction(summary_df)
