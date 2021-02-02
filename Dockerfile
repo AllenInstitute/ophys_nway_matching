@@ -13,7 +13,7 @@ RUN git clone https://github.com/AllenInstitute/ophys_nway_matching
 
 RUN cd ophys_nway_matching && \
     git checkout ${MYBRANCH} && \
-    pip install .
+    pip install .[LIMS]
 
 WORKDIR /ophys_nway_matching
 
