@@ -12,6 +12,7 @@ setup(name="ophys_nway_matching",
       author="Daniel Kapner, original code Fuhui Long",
       author_email='danielk@alleninstitute.org',
       url="https://github.com/AllenInstitute/ophys_nway_matching",
-      packages=find_packages(),
+      package_dir={"": "src"},
+      packages=find_packages(where="src"),
       setup_requires=['setuptools_scm'],
       install_requires=required)
