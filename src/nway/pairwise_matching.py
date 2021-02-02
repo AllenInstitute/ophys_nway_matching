@@ -448,7 +448,7 @@ class PairwiseMatching(ArgSchemaParser):
         if meta_reg.best_candidate == ["Identity"]:
             self.tform = self.tform.astype('float')
             output_json = {
-                    'unmatched': {},
+                    'unmatched': dict(),
                     'matches': [],
                     'rejected': [],
                     'fixed_experiment': self.args['fixed']['id'],
@@ -514,6 +514,7 @@ class PairwiseMatching(ArgSchemaParser):
 
         # opencv likes float32, but json does not
         self.tform = self.tform.astype('float')
+        print(self.unmatched)
         output_json = {
                 'unmatched': self.unmatched,
                 'matches': self.matches,

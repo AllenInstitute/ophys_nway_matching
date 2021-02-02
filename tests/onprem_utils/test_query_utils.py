@@ -1,4 +1,4 @@
-import nway.assembly_utils.query_utils as qu
+import nway.onprem_utils.query_utils as qu
 import pytest
 import os
 

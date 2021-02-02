@@ -7,7 +7,7 @@ jobs:
       - checkout
       - run:
           command |
-            pip install .[LIMS]
+            pip install .[ONPREM]
       - run:
           command: |
             python -m pytest --cov nway --cov-report xml
