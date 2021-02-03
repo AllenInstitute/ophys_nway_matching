@@ -514,7 +514,6 @@ class PairwiseMatching(ArgSchemaParser):
 
         # opencv likes float32, but json does not
         self.tform = self.tform.astype('float')
-        print(self.unmatched)
         output_json = {
                 'unmatched': self.unmatched,
                 'matches': self.matches,
