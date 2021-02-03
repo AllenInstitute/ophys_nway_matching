@@ -49,9 +49,6 @@ class PairwiseExperimentSchema(OnPremExperimentSchema):
 
 
 class CommonMatchingParameters(DefaultSchema):
-    log_level = fields.Str(
-        default="INFO",
-        description="override argschema default")
     maximum_distance = fields.Int(
         required=False,
         default=10,
