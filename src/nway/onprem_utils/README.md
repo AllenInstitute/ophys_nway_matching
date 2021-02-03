@@ -4,10 +4,6 @@
 ```
 pip install .[ONPREM]
 ```
-or
-```
-pip install -e .[ONPREM]
-```
 The docker image will have the repo installed with `ONPREM`.
 
 * you'll need the environment variables `LIMS_USER` and `LIMS_PASSWORD` defined as you would using AllenSDK or VisualBheaviorAnalysis.
