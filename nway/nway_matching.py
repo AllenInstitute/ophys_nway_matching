@@ -6,6 +6,9 @@ import copy
 import multiprocessing
 import pandas as pd
 import networkx as nx
+import PIL.Image
+from pathlib import Path
+from typing import List
 from nway.pairwise_matching import PairwiseMatching
 from nway.schemas import NwayMatchingSchema, NwayMatchingOutputSchema
 import nway.utils as utils
@@ -119,6 +122,24 @@ def pair_match_job(pair_args):
     return pair_match
 
 
+def check_image_sizes(image_paths: List[Path]):
+    sizes = dict()
+    for image_path in image_paths:
+        with open(image_path, 'rb') as fp:
+            im = PIL.Image.open(fp)
+            sizes.update({str(image_path): im.size})
+    try:
+        sz0 = next(iter(sizes.values()))
+        assert all([i == sz0 for i in sizes.values()])
+    except AssertionError:
+        estr = "\n".join([f"{v}: {k}"
+                          for k, v in sizes.items()])
+        raise NwayException("not all experiments have the same size "
+                            "average projection images, which nway "
+                            "matching currently expects. sizes and image "
+                            f"paths are\n{estr}")
+
+
 class NwayMatching(ArgSchemaParser):
     default_schema = NwayMatchingSchema
     default_output_schema = NwayMatchingOutputSchema
@@ -134,11 +155,16 @@ class NwayMatching(ArgSchemaParser):
 
         """
         self.experiments = []
+        image_paths = []
         for exp in self.args['experiment_containers']['ophys_experiments']:
             self.experiments.append(
                     utils.create_nice_mask(
                         exp,
                         self.args['output_directory']))
+            image_paths.append(
+                    Path(exp['ophys_average_intensity_projection_image']))
+
+        check_image_sizes(image_paths)
 
         if len(self.experiments) < 2:
             raise NwayException("Need at least 2 experiements from input")

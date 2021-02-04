@@ -5,6 +5,8 @@ from jinja2 import Template
 import json
 import numpy as np
 import copy
+import contextlib
+import PIL.Image
 
 
 TEST_FILE_DIR = os.path.join(
@@ -38,6 +40,28 @@ def input_file(tmpdir):
                 test_files_dir=str(thistest)))
     rendered['log_level'] = "DEBUG"
     yield rendered
+
+
+@pytest.mark.parametrize(
+        "sizes, context",
+        [
+            (
+                [(100, 100), (100, 100), (100, 100)],
+                contextlib.nullcontext()),
+            (
+                [(100, 100), (100, 99), (100, 100)],
+                pytest.raises(
+                    nway.NwayException,
+                    match=r"not all experiments have the same size.*"))])
+def test_nway_size_mismatch_exception(tmpdir, sizes, context):
+    impaths = []
+    for i, size in enumerate(sizes):
+        impath = tmpdir / f"test_{i}.png"
+        with PIL.Image.new(size=size, mode='L') as im:
+            im.save(str(impath))
+        impaths.append(impath)
+    with context:
+        nway.check_image_sizes(impaths)
 
 
 def test_nway_exception(tmpdir, input_file):
