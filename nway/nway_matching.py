@@ -6,6 +6,7 @@ import copy
 import multiprocessing
 import pandas as pd
 import networkx as nx
+import PIL.Image
 from nway.pairwise_matching import PairwiseMatching
 from nway.schemas import NwayMatchingSchema, NwayMatchingOutputSchema
 import nway.utils as utils
@@ -133,12 +134,28 @@ class NwayMatching(ArgSchemaParser):
             path to json file containing nway matching input
 
         """
+        avg_proj_key = "ophys_average_intensity_projection_image"
         self.experiments = []
+        sizes = dict()
         for exp in self.args['experiment_containers']['ophys_experiments']:
             self.experiments.append(
                     utils.create_nice_mask(
                         exp,
                         self.args['output_directory']))
+
+            with PIL.Image.open(exp[avg_proj_key]) as im:
+                sizes.update({exp['id']: im.size})
+
+        try:
+            for a, b in itertools.combinations(sizes.values(), 2):
+                assert a == b
+        except AssertionError:
+            estr = "\n".join([f"experiment {k}: {v}"
+                              for k, v in sizes.items()])
+            raise NwayException("not all experiments have the same size "
+                                "average projection images, which nway "
+                                "matching currently expects. Experiments "
+                                f"and sizes are\n{estr}")
 
         if len(self.experiments) < 2:
             raise NwayException("Need at least 2 experiements from input")

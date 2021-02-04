@@ -5,6 +5,7 @@ from jinja2 import Template
 import json
 import numpy as np
 import copy
+import PIL.Image
 
 
 TEST_FILE_DIR = os.path.join(
@@ -38,6 +39,39 @@ def input_file(tmpdir):
                 test_files_dir=str(thistest)))
     rendered['log_level'] = "DEBUG"
     yield rendered
+
+
+@pytest.fixture(scope='function')
+def input_file_size_mismatch(tmpdir):
+    thistest = os.path.join(TEST_FILE_DIR, 'test0')
+    myinput = os.path.join(thistest, 'input.json')
+    with open(myinput, 'r') as f:
+        template = Template(json.dumps(json.load(f)))
+    output_dir = str(tmpdir.mkdir("nway_test"))
+    rendered = json.loads(
+            template.render(
+                output_dir=output_dir,
+                test_files_dir=str(thistest)))
+    experiments = rendered['experiment_containers']['ophys_experiments']
+    impath = experiments[0]['ophys_average_intensity_projection_image']
+    with PIL.Image.open(impath) as im:
+        sz = im.size
+        im_cropped = np.array(im)[:, 0:sz[0] - 1]
+    new_path = tmpdir / "cropped_image.png"
+    with PIL.Image.fromarray(im_cropped) as im:
+        im.save(str(new_path))
+    experiments[0]['ophys_average_intensity_projection_image'] = str(new_path)
+    yield rendered
+
+
+def test_nway_size_mismatch_exception(tmpdir, input_file_size_mismatch):
+    args = copy.deepcopy(input_file_size_mismatch)
+    output_dir = str(tmpdir.mkdir("nway_exception"))
+    args['output_directory'] = output_dir
+    nwmatch = nway.NwayMatching(input_data=args, args=[])
+    with pytest.raises(nway.NwayException,
+                       match=r"not all experiments have the same size.*"):
+        nwmatch.run()
 
 
 def test_nway_exception(tmpdir, input_file):
