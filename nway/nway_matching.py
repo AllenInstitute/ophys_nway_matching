@@ -129,8 +129,8 @@ def check_image_sizes(image_paths: List[Path]):
             im = PIL.Image.open(fp)
             sizes.update({str(image_path): im.size})
     try:
-        for a, b in itertools.combinations(sizes.values(), 2):
-            assert a == b
+        sz0 = next(iter(sizes.values()))
+        assert all([i == sz0 for i in sizes.values()])
     except AssertionError:
         estr = "\n".join([f"{v}: {k}"
                           for k, v in sizes.items()])
