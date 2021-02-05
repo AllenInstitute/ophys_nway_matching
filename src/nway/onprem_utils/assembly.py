@@ -1,5 +1,8 @@
 import argschema
 import marshmallow
+import platform
+from typing import Union
+from pathlib import Path, PureWindowsPath
 from nway.onprem_utils import query_utils
 from nway.schemas import (CellROISchema, OnPremExperimentSchema,
                           ExperimentContainerSchema,
@@ -39,6 +42,13 @@ class OnPremAssemblyInputSchema(argschema.ArgSchema):
         return data
 
 
+def system_friendly_filename(fname: Union[Path, str]) -> str:
+    if platform.system() == "Windows":
+        return "\\" + str(PureWindowsPath(fname))
+    else:
+        return str(fname)
+
+
 def experiment_query(dbconn, experiment_id=None, session_id=None):
     if session_id is not None:
         exp_query = dbconn.query(
@@ -73,6 +83,7 @@ def experiment_query(dbconn, experiment_id=None, session_id=None):
         WHERE wkft.name='OphysAverageIntensityProjectionImage'
         AND ocsr.current=True
         AND ocsr.ophys_experiment_id={experiment_id}""")[0]['path']
+    avg_projection = system_friendly_filename(avg_projection)
     experiment = OnPremExperimentSchema().load({
         'id': experiment_id,
         'stimulus_name': stimulus,
