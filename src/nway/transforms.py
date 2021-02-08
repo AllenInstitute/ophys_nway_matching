@@ -122,14 +122,19 @@ def pad_to_match(arr1: np.ndarray, arr2: np.ndarray
     arr1: np.ndarray
         first array
     arr2: np.ndarray
-        first array
+        second array
 
     Returns
     -------
     arr1: np.ndarray
         first array, padded where necessary
     arr2: np.ndarray
-        first array, padded where necessary
+        second array, padded where necessary
+
+    Notes
+    -----
+    paddings are appended to the image dimensions, not inserted at 
+    row/col = 0. This preserves any ROI location information
 
     """
     mxrow = max(arr1.shape[0], arr2.shape[0])
