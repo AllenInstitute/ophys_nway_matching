@@ -50,8 +50,8 @@ def input_file(tmpdir):
                 contextlib.nullcontext()),
             (
                 [(100, 100), (100, 99), (100, 100)],
-                pytest.raises(
-                    nway.NwayException,
+                pytest.warns(
+                    UserWarning,
                     match=r"not all experiments have the same size.*"))])
 def test_nway_size_mismatch_exception(tmpdir, sizes, context):
     impaths = []

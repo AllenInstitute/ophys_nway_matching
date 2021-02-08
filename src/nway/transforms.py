@@ -133,7 +133,7 @@ def pad_to_match(arr1: np.ndarray, arr2: np.ndarray
 
     Notes
     -----
-    paddings are appended to the image dimensions, not inserted at 
+    paddings are appended to the image dimensions, not inserted at
     row/col = 0. This preserves any ROI location information
 
     """
