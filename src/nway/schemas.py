@@ -1,32 +1,45 @@
 from argschema.schemas import DefaultSchema
 from argschema import ArgSchema
-from argschema.fields import (
-        Boolean, Int, Str, Float, Dict,
-        List, InputFile, OutputDir, Nested,
-        OutputFile, Bool)
+from argschema.fields import InputFile, OutputDir, OutputFile
 import marshmallow as mm
+from marshmallow import fields
 import logging
 import json
 
 logger = logging.getLogger(__name__)
 
 
-class ExperimentSchema(DefaultSchema):
-    id = Int(
-        required=True,
-        description="experiment id")
-    ophys_average_intensity_projection_image = InputFile(
-        required=True,
-        description="max projection intensity image")
-    stimulus_name = Str(
-        required=False,
-        allow_none=True,
-        description="Name of stimulus for a given experiment")
-    cell_rois = List(
-        Dict,
-        required=True,
-        cli_as_single_argument=True,
-        description='dict mapping of ids, labels, zs,')
+class CellROISchema(DefaultSchema):
+    id = fields.Int()
+    x = fields.Int()
+    y = fields.Int()
+    z = fields.Int()
+    width = fields.Int()
+    height = fields.Int()
+    valid = fields.Bool()
+    mask_matrix = fields.List(fields.List(fields.Bool))
+
+
+class OnPremExperimentSchema(DefaultSchema):
+    id = fields.Int()
+    stimulus_name = fields.Str(required=False, allow_none=True)
+    ophys_average_intensity_projection_image = InputFile()
+    cell_rois = fields.Nested(CellROISchema, many=True)
+
+
+class ExperimentContainerSchema(DefaultSchema):
+    ophys_experiments = fields.Nested(OnPremExperimentSchema, many=True)
+
+
+class OnPremGeneratedInputSchema(DefaultSchema):
+    """This structure is what comes out of the LIMS ophys_nway
+    strategy
+    """
+    output_directory = OutputDir(required=False)
+    experiment_containers = fields.Nested(ExperimentContainerSchema)
+
+
+class PairwiseExperimentSchema(OnPremExperimentSchema):
     nice_mask_path = InputFile(
         required=True,
         description="path to mask tiff with unique labels")
@@ -35,26 +48,23 @@ class ExperimentSchema(DefaultSchema):
         description="path to dict for mask labels to LIMS ids")
 
 
-class CommonMatchingSchema(ArgSchema):
-    log_level = Str(
-        default="INFO",
-        description="override argschema default")
-    maximum_distance = Int(
+class CommonMatchingParameters(DefaultSchema):
+    maximum_distance = fields.Int(
         required=False,
         default=10,
         description=("Maximum distance (in pixels) between two cells,"
                      " above which a match is always rejected."))
-    registration_iterations = Int(
+    registration_iterations = fields.Int(
         required=False,
         default=1000,
         description=("Number of iterations for intensity-"
                      "based registration"))
-    registration_precision = Float(
+    registration_precision = fields.Float(
         required=False,
         default=1.5e-7,
         description=("Threshold of squared error, below which "
                      "registration is terminated"))
-    assignment_solver = Str(
+    assignment_solver = fields.Str(
         required=False,
         default="Blossom",
         missing="Blossom",
@@ -63,7 +73,7 @@ class CommonMatchingSchema(ArgSchema):
             "Hungarian"]),
         description=("What method to use for solving the assignment problem"
                      " in pairwise matching"))
-    motionType = Str(
+    motionType = fields.Str(
         required=False,
         missing="MOTION_EUCLIDEAN",
         default="MOTION_EUCLIDEAN",
@@ -73,29 +83,29 @@ class CommonMatchingSchema(ArgSchema):
             "MOTION_AFFINE",
             "MOTION_HOMOGRAPHY"
             ]))
-    gaussFiltSize = Int(
+    gaussFiltSize = fields.Int(
         required=False,
         missing=5,
         default=5,
         description="passed to opencv findTransformECC")
-    CLAHE_grid = Int(
+    CLAHE_grid = fields.Int(
         required=False,
         default=24,
         missing=24,
         description="tileGridSize for cv2 CLAHE, set to -1 to disable CLAHE")
-    CLAHE_clip = Float(
+    CLAHE_clip = fields.Float(
         required=False,
         default=2.5,
         missing=2.5,
         description="clipLimit for cv2 CLAHE")
-    edge_buffer = Int(
+    edge_buffer = fields.Int(
         required=False,
         default=40,
         missing=40,
         description=("in the Crop transform for meta-registration, this "
                      "many pixels will be cropped from the top, bottom, "
                      "left, and right of both images."))
-    include_original = Bool(
+    include_original = fields.Bool(
         required=False,
         default=False,
         missing=False,
@@ -111,20 +121,16 @@ class CommonMatchingSchema(ArgSchema):
         return data
 
 
-class NwayMatchingSchema(CommonMatchingSchema):
+class NwayMatchingSchema(ArgSchema,
+                         CommonMatchingParameters,
+                         OnPremGeneratedInputSchema):
     ''' Class that uses argschema to take care of input arguments '''
-    output_directory = OutputDir(
-        required=True,
-        description=("destination for output files. If None, will be set from "
-                     "output_directory field in input file"))
-    experiment_containers = Dict(
-        required=True,
-        description="contains data for matching")
-    save_pairwise_results = Boolean(
+    log_level = fields.Str(default="INFO")
+    save_pairwise_results = fields.Bool(
         required=False,
         default=False,
         description=("Whether to save pairwise output jsons"))
-    pruning_method = Str(
+    pruning_method = fields.Str(
         required=False,
         missing="keepmin",
         default="keepmin",
@@ -133,7 +139,7 @@ class NwayMatchingSchema(CommonMatchingSchema):
                      "    graph neighbors of lowest subgraph score."
                      "'popmax': delete highest scores of subgraphs "
                      "    recursively"))
-    parallel_workers = Int(
+    parallel_workers = fields.Int(
         required=False,
         missing=3,
         default=3,
@@ -141,27 +147,67 @@ class NwayMatchingSchema(CommonMatchingSchema):
                      "for executing pairwise matching. If 1, runs serially."))
 
 
-class PairwiseMatchingSchema(CommonMatchingSchema):
+class PairwiseMatchingSchema(ArgSchema, CommonMatchingParameters):
     output_directory = OutputDir(
         required=True,
         description="destination for output files.")
-    save_registered_image = Boolean(
+    save_registered_image = fields.Bool(
         required=False,
         default=False,
         description='Whether to save registered image.')
-    fixed = Nested(ExperimentSchema)
-    moving = Nested(ExperimentSchema)
+    fixed = fields.Nested(PairwiseExperimentSchema)
+    moving = fields.Nested(PairwiseExperimentSchema)
 
 
-class NwayMatchingOutputSchema(DefaultSchema):
-    nway_matches = List(
-        List(Int),
+class TransformPropertySchema(DefaultSchema):
+    scale = fields.Tuple((fields.Float(), fields.Float()))
+    shear = fields.Float()
+    rotation = fields.Float()
+    translation = fields.Tuple((fields.Float(), fields.Float()))
+
+
+class TransformSchema(DefaultSchema):
+    best_registration = fields.List(fields.Str)
+    properties = fields.Nested(TransformPropertySchema)
+    matrix = fields.List(fields.List(fields.Float()))
+    transform_type = fields.Str()
+
+
+class MatchSchema(DefaultSchema):
+    fixed = fields.Int()
+    moving = fields.Int()
+    distance = fields.Float()
+    cost = fields.Float()
+    iou = fields.Float()
+
+
+class UnmatchedSchema(DefaultSchema):
+    fixed = fields.List(fields.Int(), required=False)
+    moving = fields.List(fields.Int(), required=False)
+
+
+class PairwiseOutputSchema(DefaultSchema):
+    fixed_experiment = fields.Int(
+        required=True,
+        description="fixed experiment id of pair")
+    moving_experiment = fields.Int(
+        required=True,
+        description="moving experiment id of pair")
+    transform = fields.Nested(TransformSchema)
+    matches = fields.Nested(MatchSchema, many=True)
+    rejected = fields.Nested(MatchSchema, many=True)
+    unmatched = fields.Nested(UnmatchedSchema)
+
+
+class NwayMatchingOutputNoPlotsSchema(DefaultSchema):
+    nway_matches = fields.List(
+        fields.List(fields.Int),
         required=True,
         description="list of lists of matching IDs")
-    pairwise_results = List(
-        Dict,
-        required=True,
-        description="list of pairwise result dicts")
+    pairwise_results = fields.Nested(PairwiseOutputSchema, many=True)
+
+
+class NwayMatchingOutputSchema(NwayMatchingOutputNoPlotsSchema):
     nway_match_fraction_plot = OutputFile(
         required=True,
         description="Path of match fraction plot *.png")
@@ -173,34 +219,11 @@ class NwayMatchingOutputSchema(DefaultSchema):
         description="Path of warp summary plot *.png")
 
 
-class PairwiseOutputSchema(DefaultSchema):
-    fixed_experiment = Int(
-        required=True,
-        description="fixed experiment id of pair")
-    moving_experiment = Int(
-        required=True,
-        description="moving experiment id of pair")
-    transform = Dict(
-        required=True,
-        description="transform applied to moving")
-    matches = List(
-        Dict,
-        required=True,
-        description="matches made from pairwise matching")
-    rejected = List(
-        Dict,
-        required=True,
-        description="pairs within max_distance, but not matched")
-    unmatched = Dict(
-        required=True,
-        description="list of cell IDs that were never in a considered pair")
-
-
 class NwayDiagnosticSchema(ArgSchema):
     output_pdf = OutputFile(
         required=True,
         description="path to output pdf")
-    use_input_dir = Bool(
+    use_input_dir = fields.Bool(
         required=False,
         missing=False,
         default=False,
@@ -216,14 +239,12 @@ class NwayMatchSummarySchema(ArgSchema):
         required=False,
         desc="Output *.json file from nway matching."
     )
-    nway_input = Dict(
+    # TODO: eliminate this non-specific Dict
+    nway_input = fields.Dict(
         required=True,
         desc="Input to nway matching in Python dictionary form."
     )
-    nway_output = Dict(
-        required=True,
-        desc="Output of nway matching in Python dictionary form."
-    )
+    nway_output = fields.Nested(NwayMatchingOutputNoPlotsSchema)
     output_directory = OutputDir(
         required=True,
         description="Destination for summary plot output file(s).")

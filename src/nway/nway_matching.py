@@ -455,6 +455,7 @@ class NwayMatching(ArgSchemaParser):
         nway_summarizer = NwaySummary(
             input_data={'nway_input': self.args,
                         'nway_output': output_dict,
+                        'log_level': self.args['log_level'],
                         'output_directory': self.args["output_directory"]},
             args=[])
         plot_save_paths: dict = nway_summarizer.run()

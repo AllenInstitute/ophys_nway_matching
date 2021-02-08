@@ -448,7 +448,7 @@ class PairwiseMatching(ArgSchemaParser):
         if meta_reg.best_candidate == ["Identity"]:
             self.tform = self.tform.astype('float')
             output_json = {
-                    'unmatched': {},
+                    'unmatched': dict(),
                     'matches': [],
                     'rejected': [],
                     'fixed_experiment': self.args['fixed']['id'],

@@ -623,7 +623,8 @@ def plot_container_warp_summary(nway_summary_df: pd.DataFrame) -> Figure:
 
     fig, axes = plt.subplots(nrows=4,
                              ncols=num_ax_cols,
-                             figsize=(30, 10))
+                             figsize=(30, 10),
+                             squeeze=False)
     # Turn off all axes in subplots
     for ax in axes.ravel():
         ax.set_axis_off()
@@ -679,25 +680,27 @@ class NwaySummary(ArgSchemaParser):
                                             expt_id_avg_image_map,
                                             self.args['nway_output'])
 
-        fig1 = plot_container_match_fraction(summary_df)
-        fig2 = plot_container_warp_overlays(summary_df)
-        fig3 = plot_container_warp_summary(summary_df)
+        figs = [
+                plot_container_match_fraction(summary_df),
+                plot_container_warp_overlays(summary_df),
+                plot_container_warp_summary(summary_df)]
 
         save_dir = Path(self.args['output_directory'])
         timestamp = time.strftime('%Y_%m_%d_%H_%M_%S', time.localtime())
 
-        fig1_save_path = save_dir / f"nway_match_fraction_plot_{timestamp}.png"
-        fig2_save_path = save_dir / f"nway_warp_overlay_plot_{timestamp}.png"
-        fig3_save_path = save_dir / f"nway_warp_summary_plot_{timestamp}.png"
+        fig_paths = [
+                save_dir / f"nway_match_fraction_plot_{timestamp}.png",
+                save_dir / f"nway_warp_overlay_plot_{timestamp}.png",
+                save_dir / f"nway_warp_summary_plot_{timestamp}.png"]
 
-        fig1.savefig(fig1_save_path, dpi=300, bbox_inches="tight")
-        fig2.savefig(fig2_save_path, dpi=300, bbox_inches="tight")
-        fig3.savefig(fig3_save_path, dpi=300, bbox_inches="tight")
+        for fig, fig_path in zip(figs, fig_paths):
+            fig.savefig(fig_path, dpi=300, bbox_inches="tight")
+            self.logger.info(f"wrote {fig_path}")
 
         return {
-            "nway_match_fraction_plot": str(fig1_save_path),
-            "nway_warp_overlay_plot": str(fig2_save_path),
-            "nway_warp_summary_plot": str(fig3_save_path)
+            "nway_match_fraction_plot": str(fig_paths[0]),
+            "nway_warp_overlay_plot": str(fig_paths[1]),
+            "nway_warp_summary_plot": str(fig_paths[2])
         }
 
 
