@@ -7,6 +7,7 @@ import numpy as np
 import copy
 import contextlib
 import PIL.Image
+from pathlib import Path
 
 
 TEST_FILE_DIR = os.path.join(
@@ -62,6 +63,56 @@ def test_nway_size_mismatch_exception(tmpdir, sizes, context):
         impaths.append(impath)
     with context:
         nway.check_image_sizes(impaths)
+
+
+@pytest.fixture
+def sub_experiments(tmpdir, request):
+    exps = []
+    for i in range(3):
+        subdir = tmpdir / f"{i}"
+        subdir.mkdir()
+        avg_path = subdir / request.param.get("avg_fname")
+        with open(avg_path, "w") as fp:
+            fp.write("content")
+        exps.append(
+                {'ophys_average_intensity_projection_image': str(avg_path)})
+        if request.param.get("max_exists"):
+            max_path = subdir / "maxInt_a13a.png"
+            with open(max_path, "w") as fp:
+                fp.write("content")
+    yield exps
+
+
+@pytest.mark.parametrize(
+        "sub_experiments, context",
+        [
+            (
+                {
+                    "avg_fname": "avgInt_a1X.png",
+                    "max_exists": True},
+                contextlib.nullcontext()),
+            (
+                {
+                    "avg_fname": "XYZ_avgInt_a1X.png",
+                    "max_exists": True},
+                pytest.raises(
+                    nway.NwayException,
+                    match=r"flag 'substitute_max_for_avg' only.*")),
+            (
+                {
+                    "avg_fname": "avgInt_a1X.png",
+                    "max_exists": False},
+                pytest.raises(
+                    nway.NwayException,
+                    match=r"attempted to substitute .*")),
+            ],
+        indirect=['sub_experiments'])
+def test_substitute_max_projection(sub_experiments, context):
+    with context:
+        exps = nway.substitute_max_projection(sub_experiments)
+        for exp in exps:
+            p = Path(exp['ophys_average_intensity_projection_image'])
+            assert p.name == "maxInt_a13a.png"
 
 
 def test_nway_exception(tmpdir, input_file):

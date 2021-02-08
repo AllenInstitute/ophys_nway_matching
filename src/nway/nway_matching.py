@@ -141,6 +141,25 @@ def check_image_sizes(image_paths: List[Path]):
                       f"sizes and image paths are\n{estr}")
 
 
+def substitute_max_projection(experiments: dict) -> dict:
+    aname = "avgInt_a1X.png"
+    mname = "maxInt_a13a.png"
+    key = "ophys_average_intensity_projection_image"
+    for exp in experiments:
+        avg_path = Path(exp[key])
+        if avg_path.name != aname:
+            raise NwayException("flag 'substitute_max_for_avg' only "
+                                f"implemented for filenames {aname} "
+                                f"{avg_path} was provided")
+        max_path = avg_path.parent / mname
+        if not max_path.exists():
+            raise NwayException(f"attempted to substitute {mname} "
+                                f"for {aname} but {max_path} "
+                                "does not exist")
+        exp[key] = str(max_path)
+    return experiments
+
+
 class NwayMatching(ArgSchemaParser):
     default_schema = NwayMatchingSchema
     default_output_schema = NwayMatchingOutputSchema
@@ -402,6 +421,17 @@ class NwayMatching(ArgSchemaParser):
         self.logger.info(f"NWAY_COMMIT_SHA {commit}")
         self.logger.info(f"Nway matching version {nway_version}")
 
+        if self.args['substitute_max_for_avg']:
+            exps = self.args['experiment_containers']['ophys_experiments']
+            orig_exps = copy.deepcopy(exps)
+            exps = substitute_max_projection(exps)
+            self.args['experiment_containers']['ophys_experiments'] = exps
+            key = 'ophys_average_intensity_projection_image'
+            self.logger.info("substituting max for avg projections.")
+            for before, after in zip(orig_exps, exps):
+                self.logger.info(f"substituted {after[key]} for "
+                                 f"{before[key]} as registration input")
+
         self.make_masks_from_dicts()
 
         # pair-wise matching
@@ -412,6 +442,7 @@ class NwayMatching(ArgSchemaParser):
             # marshmallow 3.0.0rc6 is less forgiving about extra keys around
             # so, pop out the unused shared keys here
             for popkey in [
+                    "substitute_max_for_avg",
                     "pruning_method",
                     "experiment_containers",
                     "save_pairwise_results",
