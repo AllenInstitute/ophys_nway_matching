@@ -145,6 +145,17 @@ class NwayMatchingSchema(ArgSchema,
         default=3,
         description=("number of parallel workers for multiprocessing pool "
                      "for executing pairwise matching. If 1, runs serially."))
+    substitute_max_for_avg = fields.Bool(
+        required=False,
+        missing=False,
+        default=False,
+        description=("if set to true, module will attempt to substitute "
+                     "'maxInt_a13a.png' for 'avgInt_a1X.png' in the "
+                     "'ophys_average_intensity_projection_image' fields of "
+                     "the input experiments. The registration is attempted "
+                     "on max rather than avg projections. "
+                     "NOTE: there is a better way to "
+                     "accomplish this. This is a temporary hack."))
 
 
 class PairwiseMatchingSchema(ArgSchema, CommonMatchingParameters):
