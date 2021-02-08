@@ -111,6 +111,41 @@ class CLAHE(Transform):
         return mov, fix
 
 
+def pad_to_match(arr1: np.ndarray, arr2: np.ndarray
+                 ) -> Tuple[np.ndarray, np.ndarray]:
+    """
+    given a mismatch in size, per-axis, pad the smaller array
+    to match the larger array size.
+
+    Parameters
+    ----------
+    arr1: np.ndarray
+        first array
+    arr2: np.ndarray
+        first array
+
+    Returns
+    -------
+    arr1: np.ndarray
+        first array, padded where necessary
+    arr2: np.ndarray
+        first array, padded where necessary
+
+    """
+    mxrow = max(arr1.shape[0], arr2.shape[0])
+    drows1 = mxrow - arr1.shape[0]
+    drows2 = mxrow - arr2.shape[0]
+
+    mxcol = max(arr1.shape[1], arr2.shape[1])
+    dcols1 = mxcol - arr1.shape[1]
+    dcols2 = mxcol - arr2.shape[1]
+
+    arr1 = np.pad(arr1, [(0, drows1), (0, dcols1)])
+    arr2 = np.pad(arr2, [(0, drows2), (0, dcols2)])
+
+    return arr1, arr2
+
+
 class PhaseCorrelate(Transform):
     """estimates geometrical transform by phase correlation
     and applies the transform
@@ -125,6 +160,9 @@ class PhaseCorrelate(Transform):
             uint8, needed for opencv operations
 
         """
+        if src.shape != dst.shape:
+            src, dst = pad_to_match(src, dst)
+
         (dx, dy), _ = cv2.phaseCorrelate(src1=dst.astype('float32'),
                                          src2=src.astype('float32'))
         self.matrix = np.eye(3).astype('float32')

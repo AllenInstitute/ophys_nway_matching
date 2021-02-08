@@ -7,6 +7,7 @@ import multiprocessing
 import pandas as pd
 import networkx as nx
 import PIL.Image
+import warnings
 from pathlib import Path
 from typing import List
 from nway.pairwise_matching import PairwiseMatching
@@ -134,10 +135,10 @@ def check_image_sizes(image_paths: List[Path]):
     except AssertionError:
         estr = "\n".join([f"{v}: {k}"
                           for k, v in sizes.items()])
-        raise NwayException("not all experiments have the same size "
-                            "average projection images, which nway "
-                            "matching currently expects. sizes and image "
-                            f"paths are\n{estr}")
+        warnings.warn("not all experiments have the same size "
+                      "average projection images. PhaseCorrelate "
+                      "transform will zero-pad to match sizes. "
+                      f"sizes and image paths are\n{estr}")
 
 
 class NwayMatching(ArgSchemaParser):

@@ -74,6 +74,70 @@ def test_CLAHE(src, dst, grid, clip):
     assert fix.shape == dst.shape
 
 
+@pytest.mark.parametrize("switch_order", [True, False])
+@pytest.mark.parametrize(
+        "x, y, expected_x, expected_y",
+        [
+            (
+                np.array([[1, 1],
+                          [1, 1]]),
+                np.array([[1, 1, 1],
+                          [1, 1, 1],
+                          [1, 1, 1]]),
+                np.array([[1, 1, 0],
+                          [1, 1, 0],
+                          [0, 0, 0]]),
+                np.array([[1, 1, 1],
+                          [1, 1, 1],
+                          [1, 1, 1]])),
+            (
+                np.array([[1, 1, 1],
+                          [1, 1, 1]]),
+                np.array([[1, 1, 1],
+                          [1, 1, 1],
+                          [1, 1, 1]]),
+                np.array([[1, 1, 1],
+                          [1, 1, 1],
+                          [0, 0, 0]]),
+                np.array([[1, 1, 1],
+                          [1, 1, 1],
+                          [1, 1, 1]])),
+            (
+                np.array([[1, 1],
+                          [1, 1],
+                          [1, 1]]),
+                np.array([[1, 1, 1],
+                          [1, 1, 1],
+                          [1, 1, 1]]),
+                np.array([[1, 1, 0],
+                          [1, 1, 0],
+                          [1, 1, 0]]),
+                np.array([[1, 1, 1],
+                          [1, 1, 1],
+                          [1, 1, 1]])),
+            (
+                np.array([[1, 1],
+                          [1, 1],
+                          [1, 1]]),
+                np.array([[1, 1, 1],
+                          [1, 1, 1]]),
+                np.array([[1, 1, 0],
+                          [1, 1, 0],
+                          [1, 1, 0]]),
+                np.array([[1, 1, 1],
+                          [1, 1, 1],
+                          [0, 0, 0]])),
+                ])
+def test_pad_to_match(x, y, expected_x, expected_y, switch_order):
+    if switch_order:
+        y, x = nwtf.pad_to_match(y, x)
+    else:
+        x, y = nwtf.pad_to_match(x, y)
+
+    np.testing.assert_array_equal(x, expected_x)
+    np.testing.assert_array_equal(y, expected_y)
+
+
 @pytest.mark.parametrize(
         "src, expected",
         [
