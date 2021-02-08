@@ -7,6 +7,7 @@ import numpy as np
 import copy
 import contextlib
 import PIL.Image
+from pathlib import Path
 
 
 TEST_FILE_DIR = os.path.join(
@@ -108,7 +109,10 @@ def sub_experiments(tmpdir, request):
         indirect=['sub_experiments'])
 def test_substitute_max_projection(sub_experiments, context):
     with context:
-        nway.substitute_max_projection(sub_experiments)
+        exps = nway.substitute_max_projection(sub_experiments)
+        for exp in exps:
+            p = Path(exp['ophys_average_intensity_projection_image'])
+            assert p.name == "maxInt_a13a.png"
 
 
 def test_nway_exception(tmpdir, input_file):
