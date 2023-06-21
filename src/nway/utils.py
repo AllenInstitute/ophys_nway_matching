@@ -45,8 +45,8 @@ def summarize_registration_success(pair_outputs):
             success = 0
         df.loc[j['fixed_experiment'], j['moving_experiment']] = success
         df.loc[j['moving_experiment'], j['fixed_experiment']] = success
-    df = df.sort_index(0)
-    df = df.sort_index(1)
+    df = df.sort_index(axis=0)
+    df = df.sort_index(axis=1)
     id_map = {v: i for i, v in enumerate(df.index)}
     for v in id_map.keys():
         df.loc[v, v] = 1
