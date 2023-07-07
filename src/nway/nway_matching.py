@@ -233,9 +233,9 @@ class NwayMatching(ArgSchemaParser):
         linenum, expnum = np.shape(table)
         stoptag = 0
 
-        while stoptag == 0:
-            table_new = [table[0]]
+        table_new = [table[0]] if table.shape[0] > 0 else []
 
+        while stoptag == 0:
             for i, oline in enumerate(table[1:], 1):
                 for j, nline in enumerate(table_new):
                     mergetag = 1
