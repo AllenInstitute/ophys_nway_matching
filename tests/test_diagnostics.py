@@ -101,7 +101,7 @@ def test_plot_all(new_output, tmpdir):
 
     nwdi.plot_all(new_output, fname)
     assert os.path.isfile(fname)
-    PyPDF2.PdfFileReader(fname)
+    PyPDF2.PdfReader(fname)
 
 
 def test_NwayDiagnostics(new_output, tmpdir):
@@ -119,7 +119,7 @@ def test_NwayDiagnostics(new_output, tmpdir):
     nd = nwdi.NwayDiagnostics(input_data=args, args=[])
     nd.run()
     assert os.path.isfile(fname)
-    PyPDF2.PdfFileReader(fname)
+    PyPDF2.PdfReader(fname)
 
     ninput = os.path.join(
             output_dir,
@@ -143,7 +143,7 @@ def test_NwayDiagnostics(new_output, tmpdir):
             output_dir,
             os.path.basename(args['output_pdf']))
     assert os.path.isfile(oname)
-    PyPDF2.PdfFileReader(oname)
+    PyPDF2.PdfReader(oname)
 
 
 @pytest.fixture

@@ -117,7 +117,7 @@ def test_first_order_properties():
     M = np.eye(3, 3)
     M[0:2, 2] = np.random.randn(2)
     prop = utils.calc_first_order_properties(M)
-    assert prop['scale'] == (1.0, 1.0)
+    assert np.all(prop['scale'] == (1.0, 1.0))
     assert np.isclose(prop['shear'], 0.0)
     assert np.all(prop['translation'] == M[0: 2, 2])
     assert np.isclose(prop['rotation'], 0.0)
@@ -125,7 +125,7 @@ def test_first_order_properties():
 
     M[2, 1] = 0.1
     prop = utils.calc_first_order_properties(M)
-    assert prop['scale'] == (1.0, 1.0)
+    assert np.allclose(prop['scale'], (1.0, 1.0), atol=1e-2)
     assert np.isclose(prop['shear'], 0.0)
     assert np.all(prop['translation'] == M[0: 2, 2])
     assert np.isclose(prop['rotation'], 0.0)

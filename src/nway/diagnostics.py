@@ -226,10 +226,11 @@ def pairwise_matches(
             ax.set_yscale('log')
             ax.set_xlabel('cost', fontsize=6)
             ax.set_ylabel('match count', fontsize=6)
-            rc = inner_plot_grid[ic].get_rows_columns()
-            if rc[3] != (rc[0] - 1):
+            rows = inner_plot_grid[ic].rowspan
+            cols = inner_plot_grid[ic].colspan
+            if rows[0] != (len(rows) - 1):
                 ax.set_xticks([])
-            if rc[5] != 0:
+            if cols[-1] != 0:
                 ax.set_yticks([])
 
     return costs, allcosts
@@ -604,7 +605,8 @@ def plot_container_warp_overlays(nway_summary_df: pd.DataFrame) -> Figure:
                 axes[row][col].imshow(combined_img)
                 ssim = structural_similarity(norm_expt_1_avg_img,
                                              norm_warped_avg_img,
-                                             gaussian_weights=True)
+                                             gaussian_weights=True,
+                                             data_range=1.0)
                 axes[row][col].set_title(f"SSIM: {ssim:.3f}", fontsize=16)
 
     fig.tight_layout()
@@ -645,8 +647,10 @@ def plot_container_warp_summary(nway_summary_df: pd.DataFrame) -> Figure:
         combined_img[:, :, 0] = norm_fixed_image
         combined_img[:, :, 1] = norm_warped_image
 
-        ssim = structural_similarity(fixed_image, warped_image,
-                                     gaussian_weights=True)
+        ssim = structural_similarity(
+            fixed_image,
+            warped_image,
+            gaussian_weights=True)
 
         moving_stimulus_name = row['moving_expt_stim_name']
         moving_session_type = '_'.join(moving_stimulus_name.split('_')[:2])

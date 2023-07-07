@@ -381,7 +381,7 @@ def transform_mask(moving, dst_shape, tform):
                 moving.shape[0],
                 dst_shape[0],
                 dst_shape[1]),
-            dtype=np.int)
+            dtype=int)
 
     for k, frame in enumerate(moving):
         labels = np.unique(frame)

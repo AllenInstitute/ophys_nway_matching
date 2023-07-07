@@ -194,8 +194,7 @@ class NwayMatching(ArgSchemaParser):
         regardless of conflicts.
 
         """
-        matching_frame = pd.DataFrame(
-            columns=[e['id'] for e in self.experiments])
+        matching_frames = []
 
         for pair in self.pair_matches:
             with open(pair.args['output_json'], 'r') as f:
@@ -205,7 +204,9 @@ class NwayMatching(ArgSchemaParser):
                     columns=[
                         pairj['fixed_experiment'],
                         pairj['moving_experiment']])
-            matching_frame = matching_frame.append(pairframe)
+            matching_frames.append(pairframe)
+
+        matching_frame = pd.concat(matching_frames)
 
         return matching_frame
 
