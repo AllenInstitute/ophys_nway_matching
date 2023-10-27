@@ -10,33 +10,93 @@ logger = logging.getLogger(__name__)
 
 
 class CellROISchema(DefaultSchema):
-    id = fields.Int()
-    x = fields.Int()
-    y = fields.Int()
-    z = fields.Int()
-    width = fields.Int()
-    height = fields.Int()
-    valid = fields.Bool()
-    mask_matrix = fields.List(fields.List(fields.Bool))
+    id = fields.Int(
+        description="unique ROI id. At minimum this must be unique within the "
+                    "experiment container if not globally unique."
+    )
+    x = fields.Int(
+        description="lowest x pixel coordinate of the ROI. Zero indexed"
+    )
+    y = fields.Int(
+        description="lowest y pixel coordinate of the ROI. Zero indexed"
+    )
+    z = fields.Int(
+        required=False,
+        default=0,
+        description="Unused in processing. Defaults to 0"
+    )
+    width = fields.Int(
+        description="width of the ROI mask in pixels"
+    )
+    height = fields.Int(
+        description="height of the ROI mask in pixels"
+    )
+    valid = fields.Bool(
+        required=False,
+        default=False,
+        description="True if the ROI has no processing flags/exclusion labels "
+                    "set from previous processing. Unused in this module. Any "
+                    "cuts on on the set of ROIs (if desired) should be "
+                    "applied while creating this input json. Defaults to "
+                    "False."
+    )
+    mask_matrix = fields.List(
+        fields.List(fields.Bool),
+        description="list of lists of Booleans specifying the 2-D mask of the "
+                    "individual ROI. This 2-D array plus the x, y location "
+                    "specifies fully specifies the ROI mask."
+    )
 
 
 class OnPremExperimentSchema(DefaultSchema):
-    id = fields.Int()
-    stimulus_name = fields.Str(required=False, allow_none=True)
-    ophys_average_intensity_projection_image = InputFile()
-    cell_rois = fields.Nested(CellROISchema, many=True)
+    id = fields.Int(
+        description="unique experiment id. Must be at minimum unique within "
+                    "the experiment container."
+    )
+    stimulus_name = fields.Str(
+        required=False,
+        allow_none=True,
+        description="name of stimulus used in this experiment. Unused except "
+                    "for in diagnostic plots for labeling of the plots."
+    )
+    ophys_average_intensity_projection_image = InputFile(
+        description="path to a projection image of the ophys movie. Nominally "
+                    "this is output by the suite2p_registration module of "
+                    "AllenInstitute/ophys_etl_pipelines though one could """
+                    "construct and use a projection of the Denoised "
+                    "movie or any other kind of projection image if desired. "
+                    "The image format is a one channel, unit8 PNG file."
+    )
+    cell_rois = fields.Nested(
+        CellROISchema,
+        many=True,
+        description="ROIs detected in the experiment. These are produced and "
+                    "formatted similarly to the "
+                    "AllenInstitute/segment_postprocess module in "
+                    "ophys_etl_pipelines."
+    )
 
 
 class ExperimentContainerSchema(DefaultSchema):
-    ophys_experiments = fields.Nested(OnPremExperimentSchema, many=True)
+    ophys_experiments = fields.Nested(
+        OnPremExperimentSchema,
+        many=True,
+        description="Set of ophys experiments that make up the container."
+    )
 
 
 class OnPremGeneratedInputSchema(DefaultSchema):
     """This structure is what comes out of the LIMS ophys_nway
     strategy
     """
-    output_directory = OutputDir(required=False)
-    experiment_containers = fields.Nested(ExperimentContainerSchema)
+    output_directory = OutputDir(
+        required=False,
+        description="destination for output files."
+    )
+    experiment_containers = fields.Nested(
+        ExperimentContainerSchema,
+        description="Experiment container to match ROIs across."
+    )
 
 
 class PairwiseExperimentSchema(OnPremExperimentSchema):
@@ -72,7 +132,8 @@ class CommonMatchingParameters(DefaultSchema):
             "Blossom",
             "Hungarian"]),
         description=("What method to use for solving the assignment problem"
-                     " in pairwise matching"))
+                     " in pairwise matching. Will warn if Hungarian is "
+                     "selected."))
     motionType = fields.Str(
         required=False,
         missing="MOTION_EUCLIDEAN",
@@ -82,7 +143,9 @@ class CommonMatchingParameters(DefaultSchema):
             "MOTION_EUCLIDEAN",
             "MOTION_AFFINE",
             "MOTION_HOMOGRAPHY"
-            ]))
+        ]),
+        description="What type of motion to use in cv2, ECC registration. "
+    )
     gaussFiltSize = fields.Int(
         required=False,
         missing=5,
@@ -124,12 +187,12 @@ class CommonMatchingParameters(DefaultSchema):
 class NwayMatchingSchema(ArgSchema,
                          CommonMatchingParameters,
                          OnPremGeneratedInputSchema):
-    ''' Class that uses argschema to take care of input arguments '''
+    """Class that uses argschema to take care of input arguments"""
     log_level = fields.Str(default="INFO")
     save_pairwise_results = fields.Bool(
         required=False,
         default=False,
-        description=("Whether to save pairwise output jsons"))
+        description="Whether to save pairwise output jsons")
     pruning_method = fields.Str(
         required=False,
         missing="keepmin",
@@ -149,13 +212,14 @@ class NwayMatchingSchema(ArgSchema,
         required=False,
         missing=False,
         default=False,
-        description=("if set to true, module will attempt to substitute "
-                     "'maxInt_a13a.png' for 'avgInt_a1X.png' in the "
-                     "'ophys_average_intensity_projection_image' fields of "
-                     "the input experiments. The registration is attempted "
-                     "on max rather than avg projections. "
-                     "NOTE: there is a better way to "
-                     "accomplish this. This is a temporary hack."))
+        description="NOTE: Only for onprem use in LIMS with the legacy "
+                    "segmentor. This was a temporary hack. If set to true, "
+                    "module will attempt to substitute 'maxInt_a13a.png' for "
+                    "'avgInt_a1X.png' in the "
+                    "'ophys_average_intensity_projection_image' fields of "
+                    "the input experiments. The registration is attempted "
+                    "on max rather than avg projections. "
+    )
 
 
 class PairwiseMatchingSchema(ArgSchema, CommonMatchingParameters):
@@ -171,43 +235,106 @@ class PairwiseMatchingSchema(ArgSchema, CommonMatchingParameters):
 
 
 class TransformPropertySchema(DefaultSchema):
-    scale = fields.Tuple((fields.Float(), fields.Float()))
-    shear = fields.Float()
-    rotation = fields.Float()
-    translation = fields.Tuple((fields.Float(), fields.Float()))
+    scale = fields.Tuple(
+        (fields.Float(), fields.Float()),
+        description="tuple of floats specifying the scale in x and y"
+    )
+    shear = fields.Float(
+        description="amount of shear in the affine transformation matrix"
+    )
+    rotation = fields.Float(
+        description="rotation angle in radians."
+    )
+    translation = fields.Tuple(
+        (fields.Float(), fields.Float()),
+        description="tuple of floats specifying the translation in x and y in "
+                    "pixels"
+    )
 
 
 class TransformSchema(DefaultSchema):
-    best_registration = fields.List(fields.Str)
-    properties = fields.Nested(TransformPropertySchema)
-    matrix = fields.List(fields.List(fields.Float()))
-    transform_type = fields.Str()
+    best_registration = fields.List(
+        fields.Str,
+        description="list of strings specifying the transformations used for "
+                    "the best registration."
+    )
+    properties = fields.Nested(
+        TransformPropertySchema,
+        description="decomposed properties for the approximate "
+                    "affine transformation matrix."
+    )
+    matrix = fields.List(
+        fields.List(fields.Float()),
+        description="Full, approximate affine transformation matrix."
+    )
+    transform_type = fields.Str(
+        description="type of transformation used for ECC registration. Will "
+                    "be one of MOTION_TRANSLATION, MOTION_EUCLIDEAN, "
+                    "MOTION_AFFINE, MOTION_HOMOGRAPHY as specified in the "
+                    "input schema parameter `motionType`."
+    )
 
 
 class MatchSchema(DefaultSchema):
-    fixed = fields.Int()
-    moving = fields.Int()
-    distance = fields.Float()
-    cost = fields.Float()
-    iou = fields.Float()
+    fixed = fields.Int(
+        description="id of ROI from fixed experiment"
+    )
+    moving = fields.Int(
+        description="id of ROI from moving experiment"
+    )
+    distance = fields.Float(
+        description="distance between ROIs normalized by the value of "
+                    "`maximum_distance`."
+    )
+    cost = fields.Float(
+        description="cost of the match as calculated in the method "
+                    "calculate_cost_matrix in pairwarise_matching.py"
+    )
+    iou = fields.Float(
+        description="intersection over union of the matched ROI masks"
+    )
 
 
 class UnmatchedSchema(DefaultSchema):
-    fixed = fields.List(fields.Int(), required=False)
-    moving = fields.List(fields.Int(), required=False)
+    fixed = fields.List(
+        fields.Int(),
+        required=False,
+        description="list of unmatched ROI ids from the fixed_experiment"
+    )
+    moving = fields.List(
+        fields.Int(),
+        required=False,
+        description="list of unmatched ROI ids from the moving_experiment"
+    )
 
 
 class PairwiseOutputSchema(DefaultSchema):
     fixed_experiment = fields.Int(
         required=True,
-        description="fixed experiment id of pair")
+        description="fixed experiment id in pair")
     moving_experiment = fields.Int(
         required=True,
-        description="moving experiment id of pair")
-    transform = fields.Nested(TransformSchema)
-    matches = fields.Nested(MatchSchema, many=True)
-    rejected = fields.Nested(MatchSchema, many=True)
-    unmatched = fields.Nested(UnmatchedSchema)
+        description="moving experiment id in pair")
+    transform = fields.Nested(
+        TransformSchema,
+        description="approximate affine transformation from moving to fixed "
+                    "experiment."
+    )
+    matches = fields.Nested(
+        MatchSchema,
+        many=True,
+        description="Full summary of each ROI match."
+    )
+    rejected = fields.Nested(
+        MatchSchema,
+        many=True,
+        description="Full summary of each rejected ROI match (e.g. values "
+                    "calculated but distance is outside of )."
+    )
+    unmatched = fields.Nested(
+        UnmatchedSchema,
+        description="Full summary of unmatched ROIs."
+    )
 
 
 class NwayMatchingOutputNoPlotsSchema(DefaultSchema):
@@ -215,7 +342,11 @@ class NwayMatchingOutputNoPlotsSchema(DefaultSchema):
         fields.List(fields.Int),
         required=True,
         description="list of lists of matching IDs")
-    pairwise_results = fields.Nested(PairwiseOutputSchema, many=True)
+    pairwise_results = fields.Nested(
+        PairwiseOutputSchema,
+        many=True,
+        description="Full summary of each pairwise match result."
+    )
 
 
 class NwayMatchingOutputSchema(NwayMatchingOutputNoPlotsSchema):
